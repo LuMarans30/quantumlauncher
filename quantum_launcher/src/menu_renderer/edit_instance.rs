@@ -17,7 +17,7 @@ use ql_core::{Instance, InstanceKind};
 use ql_core::{
     JavaVersion,
     json::{
-        GlobalSettings,
+        GlobalSettings, HorizonConfig,
         instance_config::{MainClassMode, PreLaunchPrefixMode},
     },
 };
@@ -39,44 +39,64 @@ impl MenuEditInstance {
         selected_instance: &Instance,
         jar_choices: Option<&'a CustomJarState>,
     ) -> Element<'a> {
-        widget::scrollable(checkered_list([
-            self.item_rename(selected_instance),
-            self.item_mem_alloc(),
-            // Instance type specific settings
-            match selected_instance.kind {
-                InstanceKind::Client => column![
-                    resolution_dialog(
-                        self.config.global_settings.as_ref(),
-                        |n| EditInstanceMessage::WindowWidthChanged(n).into(),
-                        |n| EditInstanceMessage::WindowHeightChanged(n).into(),
-                    ),
-                    column![
-                        widget::Space::with_height(5),
-                        widget::checkbox(
-                            "DEBUG: Enable log system (recommended)",
-                            self.config.enable_logger.unwrap_or(true)
-                        )
-                        .on_toggle(|t| EditInstanceMessage::LoggingToggle(t).into()),
-                        widget::text(LOG_DIALOG).size(12).style(tsubtitle),
-                    ]
-                    .width(Length::Fill)
-                    .spacing(5),
-                ]
-                .spacing(20),
-                // TODO: Add option to edit server.properties in user-friendly way
-                InstanceKind::Server => column![widget::button("Edit server.properties")],
-            },
-            self.item_args(),
-            self.item_java_override(),
-            self.item_custom_jar(jar_choices),
-            item_footer(selected_instance.kind),
-        ]))
-        .style(LauncherTheme::style_scrollable_flat_extra_dark)
-        .spacing(1)
-        .into()
+        let horizon = self.config.horizon.as_ref();
+
+        // `enable_logger` is Java-only (command builder + server run);
+        // Horizon always pipes its output, so the toggle would be a no-op.
+        let debug_logging = column![
+            widget::Space::with_height(5),
+            widget::checkbox(
+                "DEBUG: Enable log system (recommended)",
+                self.config.enable_logger.unwrap_or(true)
+            )
+            .on_toggle(|t| EditInstanceMessage::LoggingToggle(t).into()),
+            widget::text(LOG_DIALOG).size(12).style(tsubtitle),
+        ]
+        .width(Length::Fill)
+        .spacing(5);
+
+        let mut items = vec![self.item_rename(selected_instance)];
+        items.push(match horizon {
+            Some(horizon) => item_horizon_build(horizon),
+            None => self.item_mem_alloc(),
+        });
+        // Instance type specific settings
+        items.push(match selected_instance.kind {
+            InstanceKind::Client => {
+                let mut settings = column![resolution_dialog(
+                    self.config.global_settings.as_ref(),
+                    |n| EditInstanceMessage::WindowWidthChanged(n).into(),
+                    |n| EditInstanceMessage::WindowHeightChanged(n).into(),
+                )]
+                .spacing(20);
+                if horizon.is_none() {
+                    settings = settings.push(debug_logging);
+                }
+                settings
+            }
+            // TODO: Add option to edit server.properties in user-friendly way
+            InstanceKind::Server => column![widget::button("Edit server.properties")],
+        });
+        items.push(self.item_args());
+        if horizon.is_none() {
+            items.push(self.item_java_override());
+            items.push(self.item_custom_jar(jar_choices));
+        }
+        items.push(item_footer(selected_instance.kind, horizon.is_some()));
+
+        widget::scrollable(checkered_list(items))
+            .style(LauncherTheme::style_scrollable_flat_extra_dark)
+            .spacing(1)
+            .into()
     }
 
     fn item_rename(&self, selected_instance: &Instance) -> Column<'_> {
+        let kind_label = if self.config.horizon.is_some() {
+            "Horizon".to_owned()
+        } else {
+            self.config.mod_type.to_string()
+        };
+
         column![
             row![
                 widget::text(selected_instance.get_name().to_owned())
@@ -95,7 +115,7 @@ impl MenuEditInstance {
             .spacing(5),
             widget::text!(
                 "{} {}",
-                self.config.mod_type,
+                kind_label,
                 if selected_instance.is_server() {
                     "Server"
                 } else {
@@ -130,35 +150,55 @@ impl MenuEditInstance {
         let current_mode = self.config.global_java_args_enable.unwrap_or(true);
         let prefix_mode = self.config.pre_launch_prefix_mode.unwrap_or_default();
 
+        // Horizon has no Java, and its launch path never applies a
+        // pre-launch prefix (see `docs/HORIZON.md`). Its game arguments and
+        // environment variables do apply, so those stay.
+        let is_java = self.config.horizon.is_none();
+
         let sp = || widget::Space::with_height(5);
 
-        column![
-            row![
-                widget::text("Java arguments:").width(Length::Fill),
-                widget::checkbox("Use global arguments", current_mode)
-                    .on_toggle(|t| EditInstanceMessage::JavaArgsModeChanged(t).into())
-                    .style(|t: &LauncherTheme, s| t.style_checkbox(s, Some(Color::SecondLight)))
-                    .size(12)
-                    .text_size(12)
+        let game_args = get_args_list(self.config.game_args.as_deref(), |n| {
+            Message::EditInstance(EditInstanceMessage::GameArgs(n))
+        });
+        let env_vars = self.item_env_vars();
+        let split = args_split_by_space(self.arg_split_by_space);
+
+        if is_java {
+            column![
+                column![
+                    row![
+                        widget::text("Java arguments:").width(Length::Fill),
+                        widget::checkbox("Use global arguments", current_mode)
+                            .on_toggle(|t| EditInstanceMessage::JavaArgsModeChanged(t).into())
+                            .style(|t: &LauncherTheme, s| {
+                                t.style_checkbox(s, Some(Color::SecondLight))
+                            })
+                            .size(12)
+                            .text_size(12)
+                    ]
+                    .align_y(Alignment::Center),
+                    get_args_list(self.config.java_args.as_deref(), |n| Message::EditInstance(
+                        EditInstanceMessage::JavaArgs(n)
+                    )),
+                    sp(),
+                ]
+                .spacing(7),
+                "Game arguments:",
+                game_args,
+                sp(),
+                self.item_args_prefix(prefix_mode),
+                sp(),
+                env_vars,
+                sp(),
+                split,
             ]
-            .align_y(Alignment::Center),
-            get_args_list(self.config.java_args.as_deref(), |n| Message::EditInstance(
-                EditInstanceMessage::JavaArgs(n)
-            )),
-            sp(),
-            "Game arguments:",
-            get_args_list(self.config.game_args.as_deref(), |n| Message::EditInstance(
-                EditInstanceMessage::GameArgs(n)
-            )),
-            sp(),
-            self.item_args_prefix(prefix_mode),
-            sp(),
-            self.item_env_vars(),
-            sp(),
-            args_split_by_space(self.arg_split_by_space),
-        ]
-        .spacing(7)
-        .width(Length::Fill)
+            .spacing(7)
+            .width(Length::Fill)
+        } else {
+            column!["Game arguments:", game_args, sp(), env_vars, sp(), split,]
+                .spacing(7)
+                .width(Length::Fill)
+        }
     }
 
     fn item_args_prefix(&self, prefix_mode: PreLaunchPrefixMode) -> Column<'_> {
@@ -433,26 +473,59 @@ Heavy modpacks / High settings: 4-8 GB+"
     }
 }
 
-fn item_footer(kind: InstanceKind) -> widget::Column<'static, Message, LauncherTheme> {
-    match kind {
-        InstanceKind::Client => column![
-            row![
-                button_with_icon(icons::version_download_s(14), "Reinstall Libraries", 13)
-                    .padding([4, 8])
-                    .on_press(Message::EditInstance(
-                        EditInstanceMessage::ReinstallLibraries
-                    )),
-                button_with_icon(icons::version_download_s(14), "Update Assets", 13)
-                    .padding([4, 8])
-                    .on_press(EditInstanceMessage::UpdateAssets.into()),
-            ]
-            .spacing(5)
-            .wrap(),
-            widget::horizontal_rule(2),
-            button_with_icon(icons::bin(), "Delete Instance", 16)
-                .on_press(Message::DeleteInstanceMenu)
+fn item_horizon_build(horizon: &HorizonConfig) -> Column<'static> {
+    let info = |label: &str, value: &str| -> widget::Text<'static, LauncherTheme> {
+        widget::text!("{label}: {value}").size(14).font(FONT_MONO)
+    };
+
+    column![
+        "Horizon build",
+        column![
+            info("Release", &horizon.build_tag),
+            info("Build ID", &horizon.build_id),
+            info("Minecraft", &horizon.minecraft_version),
         ]
-        .spacing(10),
+        .spacing(2),
+        widget::text(
+            "Horizon runs natively, without Java, so the memory and Java settings don't apply.\n\
+             To use a newer Horizon build, create a new instance."
+        )
+        .size(12)
+        .style(tsubtitle),
+    ]
+    .spacing(5)
+}
+
+fn item_footer(
+    kind: InstanceKind,
+    is_horizon: bool,
+) -> widget::Column<'static, Message, LauncherTheme> {
+    match kind {
+        InstanceKind::Client => Column::new()
+            // Horizon has no libraries or assets of its own to redownload
+            .push_maybe((!is_horizon).then(|| {
+                column![
+                    row![
+                        button_with_icon(icons::version_download_s(14), "Reinstall Libraries", 13)
+                            .padding([4, 8])
+                            .on_press(Message::EditInstance(
+                                EditInstanceMessage::ReinstallLibraries
+                            )),
+                        button_with_icon(icons::version_download_s(14), "Update Assets", 13)
+                            .padding([4, 8])
+                            .on_press(EditInstanceMessage::UpdateAssets.into()),
+                    ]
+                    .spacing(5)
+                    .wrap(),
+                    widget::horizontal_rule(2),
+                ]
+                .spacing(10)
+            }))
+            .push(
+                button_with_icon(icons::bin(), "Delete Instance", 16)
+                    .on_press(Message::DeleteInstanceMenu),
+            )
+            .spacing(10),
         InstanceKind::Server => {
             column![
                 button_with_icon(icons::bin(), "Delete Server", 16)

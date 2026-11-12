@@ -92,11 +92,18 @@ prepared resources stay (other instances may use them). Delete
   can still be filled by hand.
 - **Horizon servers**: only client instances are created for now, even
   though Horizon ships a `horizon-server` binary.
-- **RAM/Java settings**: they mean nothing to Horizon, so the
-  corresponding instance settings are ignored. Window size, environment
-  variables and extra game arguments still apply (extra arguments are
-  passed to `horizon-client` as-is; it refuses options it doesn't list
-  with exit code 2).
+- **RAM/Java settings**: they mean nothing to Horizon, so the edit
+  screen hides them for Horizon instances (memory, Java version/path,
+  Java arguments, custom JAR, main class) and ignores any values already
+  in `config.json`. Window size, environment variables and extra game
+  arguments still apply (extra arguments are passed to `horizon-client`
+  as-is; it refuses options it doesn't list with exit code 2). The
+  edit screen shows the Horizon build (release, build ID and Minecraft
+  version) instead, and has no Reinstall Libraries / Update Assets
+  buttons: Horizon has no libraries or assets of its own to reinstall.
+- **Pre-launch prefix**: neither the instance's nor the global prefix is
+  applied to Horizon (the Java launch path builds it, the Horizon path
+  does not), so the edit screen hides it for Horizon instances.
 - **Updating the build**: a new Nightly means creating a new instance.
   Checking `horizon-prepare --check` happens on every launch, so a
   broken resources folder is re-prepared automatically.
