@@ -193,6 +193,10 @@ impl MenuCreateInstanceChoosing {
                 || (self.instance_name.is_empty() && n.contains(&self.selected_version.name))
         });
 
+        // Horizon isn't a Minecraft instance: it downloads no Mojang assets
+        // while being created, and it has no custom JAR settings.
+        let is_horizon = self.selected_version.kind == ListEntryKind::Horizon;
+
         let mmc_import = EXPERIMENTAL_MMC_IMPORT.read().unwrap();
 
         let menu = column![
@@ -220,7 +224,7 @@ impl MenuCreateInstanceChoosing {
 
             ].spacing(10).align_y(Alignment::Center),
         ]
-        .push_maybe(matches!(self.kind, InstanceKind::Client).then(|| tooltip(
+        .push_maybe((matches!(self.kind, InstanceKind::Client) && !is_horizon).then(|| tooltip(
             row![
                 widget::Space::with_width(5),
                 widget::checkbox("Download assets?", self.download_assets).text_size(14).size(14).on_toggle(|t| Message::CreateInstance(CreateInstanceMessage::ChangeAssetToggle(t)))
@@ -228,11 +232,11 @@ impl MenuCreateInstanceChoosing {
             widget::text("If disabled, creating instance will be MUCH faster\nbut no sound or music will play").size(12),
             Position::FollowCursor
         )))
-        .push(
+        .push_maybe((!is_horizon).then(|| {
             widget::text("To sideload your own custom JARs, create an instance with a similar version, then go to \"Edit->Custom Jar File\"")
                 .size(12)
-                .style(|t: &LauncherTheme| t.style_text(Color::Mid)),
-        )
+                .style(|t: &LauncherTheme| t.style_text(Color::Mid))
+        }))
         .push_maybe({
             let real_platform = if cfg!(target_arch = "x86") { "x86_64" } else { "aarch64" };
             cfg!(target_pointer_width = "32").then_some(column![
