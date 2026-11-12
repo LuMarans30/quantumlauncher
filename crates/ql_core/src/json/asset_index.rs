@@ -19,6 +19,11 @@ pub struct AssetObject {
 }
 
 impl AssetObject {
+    #[must_use]
+    pub fn url(&self) -> Option<&str> {
+        self.url.as_deref()
+    }
+
     pub async fn download(&self, objects_path: &Path) -> Result<(), DownloadFileError> {
         const OBJECTS_URL: &str = "https://resources.download.minecraft.net";
 

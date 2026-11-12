@@ -39,6 +39,20 @@ pub async fn create_instance(
         return Err(DownloadError::InvalidName);
     }
 
+    // Horizon has its own download and prepare steps (`config.json`
+    // marks the instance as Horizon).
+    if ql_horizon::is_horizon_version(&version.name) {
+        return ql_horizon::create_instance(
+            instance_name.clone(),
+            match &progress_sender {
+                Some(sender) => ql_horizon::Reporter::Download(sender),
+                None => ql_horizon::Reporter::Nobody,
+            },
+        )
+        .await
+        .map_err(DownloadError::Horizon);
+    }
+
     info!(
         "Started creating instance: {instance_name} (version: {}, kind: {})",
         version.name, version.kind
@@ -125,6 +139,8 @@ pub async fn repeat_stage(
         DownloadProgress::DownloadingJsonManifest | DownloadProgress::DownloadingVersionJson => {
             // Can't do anything about that :/
         }
+        // Horizon instances aren't redownloaded through this path.
+        DownloadProgress::Horizon(_) => {}
     }
     info!("Finished redownloading");
 

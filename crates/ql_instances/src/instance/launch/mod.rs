@@ -1,7 +1,8 @@
-use crate::auth::AccountData;
+use crate::auth::{AccountData, AccountType};
 use error::GameLaunchError;
 use ql_core::{
-    GenericProgress, Instance, LaunchedProcess, err, flags::redact_sensitive_info, info,
+    GenericProgress, Instance, InstanceConfigJson, LaunchedProcess, err,
+    flags::redact_sensitive_info, info,
 };
 use std::sync::{Arc, mpsc::Sender};
 use tokio::sync::Mutex;
@@ -37,6 +38,26 @@ pub async fn launch(
     }
     if username.contains(' ') {
         return Err(GameLaunchError::UsernameHasSpaces);
+    }
+
+    // Horizon instances launch from their own binary with the account's
+    // session; everything below is Java-specific.
+    if let Some(horizon) = ql_horizon::config_for(&instance_name).await? {
+        let session = horizon_session(auth.as_ref())?;
+        let instance = Instance::client(&instance_name);
+        let config = InstanceConfigJson::read(&instance).await?;
+
+        return ql_horizon::launch(
+            &instance_name,
+            &config,
+            &horizon,
+            session,
+            &username,
+            java_install_progress_sender.as_ref(),
+            global_settings.as_ref(),
+        )
+        .await
+        .map_err(GameLaunchError::Horizon);
     }
 
     let mut game_launcher = GameLauncher::new(
@@ -109,6 +130,34 @@ pub async fn launch(
         instance: Instance::client(&instance_name),
         is_classic_server: false,
     })
+}
+
+/// Turns a launcher account into the session Horizon expects.
+///
+/// `None` means offline play, allowed only with
+/// [`ql_horizon::ALLOW_OFFLINE`]: Horizon's Launch API asks launchers to
+/// start it only for an owning Microsoft account.
+fn horizon_session(
+    auth: Option<&AccountData>,
+) -> Result<Option<ql_horizon::Session>, GameLaunchError> {
+    if let Some(auth) = auth {
+        if matches!(auth.account_type, AccountType::Microsoft) {
+            let Some(access_token) = auth.access_token.clone() else {
+                return Err(GameLaunchError::InvalidToken);
+            };
+            return Ok(Some(ql_horizon::Session::new(
+                auth.nice_username.clone(),
+                auth.uuid.clone(),
+                access_token,
+            )));
+        }
+    }
+
+    if ql_horizon::ALLOW_OFFLINE {
+        Ok(None)
+    } else {
+        Err(GameLaunchError::HorizonNeedsMicrosoftAccount)
+    }
 }
 
 fn print_censored_args(auth: Option<&AccountData>, game_arguments: &mut Vec<String>) {

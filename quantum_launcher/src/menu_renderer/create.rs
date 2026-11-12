@@ -105,7 +105,10 @@ impl MenuCreateInstanceChoosing {
         let versions_iter = versions
             .iter()
             .filter(|n| n.supports_server || !matches!(self.kind, InstanceKind::Server))
-            .filter(|n| self.selected_categories.contains(&n.kind))
+            // Horizon has no category chip, so it is always listed.
+            .filter(|n| {
+                n.kind == ListEntryKind::Horizon || self.selected_categories.contains(&n.kind)
+            })
             .filter(|n| {
                 self.search_box.trim().is_empty()
                     || n.name

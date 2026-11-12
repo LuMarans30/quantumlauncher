@@ -11,7 +11,7 @@ pub use fabric::FabricJSON;
 pub use optifine::{JsonOptifine, OptifineArguments, OptifineLibrary};
 
 pub use asset_index::AssetIndex;
-pub use instance_config::{GlobalSettings, InstanceConfigJson};
+pub use instance_config::{GlobalSettings, HorizonConfig, InstanceConfigJson};
 pub use manifest::Manifest;
 pub use version::VersionDetails;
 

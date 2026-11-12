@@ -245,6 +245,13 @@ pub struct AssetIndexInfo {
     pub url: String,
 }
 
+impl AssetIndexInfo {
+    #[must_use]
+    pub fn sha1(&self) -> Option<&str> {
+        is_sha1(&self.sha1).then_some(self.sha1.as_str())
+    }
+}
+
 impl Default for AssetIndexInfo {
     fn default() -> Self {
         Self {
@@ -270,6 +277,20 @@ pub struct Download {
     sha1: String,
     size: usize,
     pub url: String,
+}
+
+impl Download {
+    /// The file's SHA-1, when the version JSON names a real one.
+    #[must_use]
+    pub fn sha1(&self) -> Option<&str> {
+        is_sha1(&self.sha1).then_some(self.sha1.as_str())
+    }
+}
+
+/// Fabric-style fallbacks carry an empty string, so only a real 40-hex
+/// digest counts as one.
+fn is_sha1(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 #[allow(non_snake_case)]
@@ -538,6 +559,12 @@ impl Debug for LibraryDownloadArtifact {
 }
 
 impl LibraryDownloadArtifact {
+    /// The artifact's SHA-1, when the version JSON names one.
+    #[must_use]
+    pub fn sha1(&self) -> Option<&str> {
+        is_sha1(&self.sha1).then_some(self.sha1.as_str())
+    }
+
     #[must_use]
     pub fn get_path(&self) -> String {
         self.path.clone().unwrap_or_else(|| {

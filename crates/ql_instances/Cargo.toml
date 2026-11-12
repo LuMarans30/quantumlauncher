@@ -14,6 +14,7 @@ simulate_macos_arm64 = ["ql_core/simulate_macos_arm64", "ql_java_handler/simulat
 [dependencies]
 ql_core.path = "../ql_core"
 ql_java_handler.path = "../ql_java_handler"
+ql_horizon.path = "../ql_horizon"
 
 chrono.workspace = true
 semver.workspace = true

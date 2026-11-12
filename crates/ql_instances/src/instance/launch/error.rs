@@ -40,6 +40,8 @@ pub enum GameLaunchError {
     JavaInstall(#[from] JavaInstallError),
     #[error("{GAME_ERR_PREFIX}{0}")]
     JarMod(#[from] JarModError),
+    #[error("{GAME_ERR_PREFIX}{0}")]
+    Horizon(#[from] ql_horizon::HorizonError),
 
     #[error("{GAME_ERR_PREFIX}{0}")]
     MsAuth(#[from] crate::auth::ms::Error),
@@ -47,6 +49,10 @@ pub enum GameLaunchError {
         "{GAME_ERR_PREFIX}Microsoft account token was not loaded\n\nTry logging out of your account and logging back in"
     )]
     InvalidToken,
+    #[error(
+        "{GAME_ERR_PREFIX}Horizon only runs with a Microsoft account that owns Minecraft: Java Edition\n\nLog in with such an account (offline accounts and Ely.by/LittleSkin can't be used)"
+    )]
+    HorizonNeedsMicrosoftAccount,
 
     #[error(
         "{GAME_ERR_PREFIX}error upgrading forge install (transforming path)\n{FORGE_UPGRADE_MESSAGE}"

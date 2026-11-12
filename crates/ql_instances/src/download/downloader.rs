@@ -27,6 +27,8 @@ pub enum DownloadError {
     Request(#[from] RequestError),
     #[error("{DOWNLOAD_ERR_PREFIX}{0}")]
     Io(#[from] IoError),
+    #[error("{DOWNLOAD_ERR_PREFIX}{0}")]
+    Horizon(#[from] ql_horizon::HorizonError),
 
     #[error("instance name is invalid (empty/disallowed characters)")]
     InvalidName,

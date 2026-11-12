@@ -4142,6 +4142,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "ql_horizon"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "flate2",
+ "owo-colors",
+ "ql_core",
+ "ql_java_handler",
+ "reqwest",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "sysinfo",
+ "tar",
+ "thiserror 2.0.20",
+ "tokio",
+ "walkdir",
+ "zip",
+]
+
+[[package]]
 name = "ql_instances"
 version = "0.0.0"
 dependencies = [
@@ -4151,6 +4174,7 @@ dependencies = [
  "keyring",
  "owo-colors",
  "ql_core",
+ "ql_horizon",
  "ql_java_handler",
  "reqwest",
  "semver",

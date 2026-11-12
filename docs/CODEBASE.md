@@ -10,6 +10,7 @@ Feel free to ask any questions on [Discord](https://discord.gg/bWqRaSXar5).
 - `ql_mod_manager` - **Mod management** and installation
 - `ql_packager` - Code related to packaging/importing instances
 - `ql_core` - Core utilities and shared code
+- `ql_horizon` - Support for launching [Horizon](https://playhorizon.dev) (a Minecraft reimplementation in Rust), see [HORIZON.md](./HORIZON.md)
 - `ql_java_handler` - A library to **auto-install** and provide **Java** runtimes
 
 # UI Pattern

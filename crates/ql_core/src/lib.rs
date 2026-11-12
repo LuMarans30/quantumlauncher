@@ -55,7 +55,7 @@ pub use error::{
 };
 pub use file_utils::{LAUNCHER_CACHE_DIR, LAUNCHER_DIR, RequestError};
 pub use print::{LOGGER, LogType, LoggingState, logger_finish};
-pub use progress::{DownloadProgress, GenericProgress, Progress};
+pub use progress::{DownloadProgress, GenericProgress, HorizonProgress, Progress};
 pub use request::download;
 pub use structs::{JavaVersion, Loader};
 
@@ -389,6 +389,7 @@ impl Display for ListEntry {
 #[serde(rename_all = "kebab-case")]
 pub enum ListEntryKind {
     Release,
+    Horizon,
     Snapshot,
     Preclassic,
     Classic,
@@ -413,6 +414,7 @@ impl Display for ListEntryKind {
             ListEntryKind::Beta => write!(f, "Beta"),
             ListEntryKind::AprilFools => write!(f, "April Fools"),
             ListEntryKind::Special => write!(f, "Special"),
+            ListEntryKind::Horizon => write!(f, "Horizon"),
         }
     }
 }

@@ -1,0 +1,25 @@
+[package]
+name = "ql_horizon"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+
+[dependencies]
+ql_core = { path = "../ql_core" }
+ql_java_handler = { path = "../ql_java_handler" }
+
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+owo-colors.workspace = true
+reqwest.workspace = true
+tokio = { workspace = true, features = ["io-util", "time"] }
+base64 = "0.22"
+ring = "0.17"
+sha1 = "0.10"
+sha2 = "0.10"
+flate2 = "1"
+tar = "0.4"
+zip.workspace = true
+walkdir.workspace = true
+sysinfo.workspace = true

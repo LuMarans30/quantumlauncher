@@ -98,6 +98,11 @@ pub struct InstanceConfigJson {
     /// Mainly only used for debugging purposes.
     pub main_class_override: Option<String>,
 
+    /// Horizon settings. `Some` means this instance is not a Minecraft
+    /// (Java) instance but [Horizon](https://playhorizon.dev).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub horizon: Option<HorizonConfig>,
+
     #[serde(flatten)]
     _extra: HashMap<String, serde_json::Value>,
 }
@@ -128,6 +133,7 @@ impl InstanceConfigJson {
 
             version_info: Some(version_info),
             main_class_override: None,
+            horizon: None,
             _extra: HashMap::new(),
         }
     }
@@ -461,6 +467,37 @@ impl CustomJarConfig {
         Self {
             name,
             autoset_main_class: false,
+            _extra: HashMap::new(),
+        }
+    }
+}
+
+/// Marks an instance as [Horizon](https://playhorizon.dev) and pins the
+/// build it was set up with.
+///
+/// The `nightly` tag is republished, so [`Self::build_id`] (not
+/// `build_tag`) identifies the installed binaries and resources.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct HorizonConfig {
+    /// The GitHub release tag the build came from (e.g. `nightly`).
+    pub build_tag: String,
+    /// The release's id, which changes on every publish.
+    pub build_id: String,
+    /// The Minecraft version this build is prepared from.
+    pub minecraft_version: String,
+
+    /// Fields from newer launchers, preserved when re-saving.
+    #[serde(flatten)]
+    _extra: HashMap<String, serde_json::Value>,
+}
+
+impl HorizonConfig {
+    #[must_use]
+    pub fn new(build_tag: String, build_id: String, minecraft_version: String) -> Self {
+        Self {
+            build_tag,
+            build_id,
+            minecraft_version,
             _extra: HashMap::new(),
         }
     }

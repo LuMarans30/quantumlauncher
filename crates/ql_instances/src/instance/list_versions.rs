@@ -13,16 +13,17 @@ pub async fn list_versions() -> Result<(Vec<ListEntry>, String), JsonDownloadErr
         .map(|version| version.id.clone())
         .unwrap_or_default();
 
-    Ok((
-        manifest
-            .versions
-            .into_iter()
-            .map(|n| ListEntry {
-                kind: ListEntryKind::calculate(&n.id, &n.r#type),
-                supports_server: n.supports_server(),
-                name: n.id,
-            })
-            .collect(),
-        latest,
-    ))
+    let mut versions: Vec<ListEntry> = manifest
+        .versions
+        .into_iter()
+        .map(|n| ListEntry {
+            kind: ListEntryKind::calculate(&n.id, &n.r#type),
+            supports_server: n.supports_server(),
+            name: n.id,
+        })
+        .collect();
+
+    versions.insert(0, ql_horizon::version_entry());
+
+    Ok((versions, latest))
 }

@@ -215,9 +215,12 @@ fn xml_parse(
 }
 
 async fn is_xml(instance: &Instance) -> Result<bool, ReadError> {
-    let json = VersionDetails::load(instance).await?;
-
-    Ok(json.logging.is_some())
+    match VersionDetails::load(instance).await {
+        Ok(json) => Ok(json.logging.is_some()),
+        // Horizon instances' logs are plain text, not log4j XML.
+        Err(JsonFileError::Io(_)) => Ok(false),
+        Err(err) => Err(err.into()),
+    }
 }
 
 /// Represents a line of log output.
