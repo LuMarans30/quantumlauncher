@@ -105,12 +105,25 @@ pub async fn create_instance(
     Ok(instance_name)
 }
 
+const HORIZON_NO_REDOWNLOAD: &str = "Horizon instances have no libraries or assets to reinstall: \
+Horizon runs from its own prepared resources, and re-checks Minecraft's files itself \
+whenever it rebuilds them.";
+
 pub async fn repeat_stage(
     instance: Instance,
     stage: DownloadProgress,
     sender: Option<Sender<DownloadProgress>>,
 ) -> Result<(), String> {
     debug_assert!(!instance.is_server());
+
+    // A Horizon instance has no `details.json` (no version JSON at all),
+    // so the lookup below would fail with a confusing error.
+    if matches!(
+        ql_horizon::config_for(instance.get_name()).await,
+        Ok(Some(_))
+    ) {
+        return Err(HORIZON_NO_REDOWNLOAD.to_owned());
+    }
 
     info!("Redownloading part of instance ({stage})");
     let instance_dir = instance.get_instance_path();
