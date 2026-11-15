@@ -5,7 +5,8 @@ use crate::{
         tsubtitle,
     },
     state::{
-        CustomJarState, EditInstanceMessage, ListMessage, MenuEditInstance, Message, NONE_JAR_NAME,
+        CustomJarState, EditInstanceMessage, HorizonUpdateState, ListMessage, MenuEditInstance,
+        Message, NONE_JAR_NAME,
     },
     stylesheet::{color::Color, styles::LauncherTheme, widgets::StyleButton},
 };
@@ -56,7 +57,7 @@ impl MenuEditInstance {
 
         let mut items = vec![self.item_rename(selected_instance)];
         items.push(match horizon {
-            Some(horizon) => item_horizon_build(horizon),
+            Some(horizon) => item_horizon_build(horizon, &self.horizon_update),
             None => self.item_mem_alloc(),
         });
         // Instance type specific settings
@@ -469,7 +470,7 @@ Heavy modpacks / High settings: 4-8 GB+"
     }
 }
 
-fn item_horizon_build(horizon: &HorizonConfig) -> Column<'static> {
+fn item_horizon_build(horizon: &HorizonConfig, update: &HorizonUpdateState) -> Column<'static> {
     let info = |label: &str, value: &str| -> widget::Text<'static, LauncherTheme> {
         widget::text!("{label}: {value}").size(14).font(FONT_MONO)
     };
@@ -483,12 +484,57 @@ fn item_horizon_build(horizon: &HorizonConfig) -> Column<'static> {
         ]
         .spacing(2),
         widget::text(
-            "Horizon runs natively, without Java, so the memory and Java settings don't apply.\n\
-             To use a newer Horizon build, create a new instance."
+            "Horizon runs natively, without Java, so the memory and Java settings don't apply."
         )
         .size(12)
         .style(tsubtitle),
+        item_horizon_update(update),
     ]
+    .spacing(5)
+}
+
+fn item_horizon_update(update: &HorizonUpdateState) -> Column<'static> {
+    let check_button = |label: &'static str| {
+        button_with_icon(icons::refresh_s(14), label, 13)
+            .padding([4, 8])
+            .on_press(Message::EditInstance(
+                EditInstanceMessage::HorizonCheckUpdate,
+            ))
+    };
+    let note = |text: &'static str| widget::text(text).size(12).style(tsubtitle);
+
+    match update {
+        HorizonUpdateState::Idle => column![
+            check_button("Check for updates"),
+            note(
+                "Nightly is republished often. Checking asks GitHub for the release's signed checksum list; the build itself is only downloaded when you update."
+            ),
+        ],
+        HorizonUpdateState::Checking => column![
+            note("Checking for a newer Nightly build..."),
+        ],
+        HorizonUpdateState::UpToDate => column![
+            note("This instance is on the latest Nightly build."),
+            check_button("Check again"),
+        ],
+        HorizonUpdateState::Failed(error) => column![
+            widget::text!("Couldn't check for updates:\n{error}")
+                .size(12)
+                .style(tsubtitle),
+            check_button("Try again"),
+        ],
+        HorizonUpdateState::Available(update) => column![
+            widget::text!("A newer Nightly build is available: {}", update.id())
+                .size(12)
+                .style(tsubtitle),
+            button_with_icon(icons::version_download_s(14), "Update Horizon", 13)
+                .padding([4, 8])
+                .on_press(Message::EditInstance(EditInstanceMessage::HorizonUpdate)),
+            note(
+                "Your worlds, options and packs stay where they are. The update downloads the new build; the next launch prepares its resources, which can take a few minutes."
+            ),
+        ],
+    }
     .spacing(5)
 }
 

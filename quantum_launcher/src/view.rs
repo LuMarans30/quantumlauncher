@@ -141,6 +141,11 @@ impl Launcher {
                 .padding(10)
                 .spacing(10)
                 .into(),
+            State::LaunchProgress => column![widget::text("Preparing to launch...").size(20)]
+                .push_maybe(self.java_recv.as_ref().map(|n| n.view()))
+                .padding(10)
+                .spacing(10)
+                .into(),
             State::ModsDownload(menu) => menu.view(&self.images, self.tick_timer),
             State::ModDescription(menu) => menu.view(&self.images, self.tick_timer),
             State::LauncherSettings(menu) => {

@@ -5,6 +5,7 @@
 //!
 //! - [`build`] downloads and verifies a build from its GitHub releases
 //! - [`create_instance`] creates an instance with only the build
+//! - [`update`] installs a newer build and points an instance at it
 //! - [`prepare`] downloads the Minecraft files and builds the game's
 //!   resources on first launch
 //! - [`launch`] starts the game, signed in or (with [`ALLOW_OFFLINE`])
@@ -26,11 +27,13 @@ mod instance;
 mod launch;
 mod mc;
 pub mod prepare;
+pub mod update;
 
 pub use error::HorizonError;
 pub use instance::create_instance;
 pub use launch::{Session, launch};
 pub use ql_core::json::HorizonConfig;
+pub use update::{BuildUpdate, check_update, update_instance};
 
 /// The pseudo "version" the create-instance menu lists for Horizon.
 ///

@@ -262,6 +262,13 @@ fn check_release_url(url: &str, tag: &str) -> Result<(), HorizonError> {
 /// Makes sure the latest build is installed, downloading it if needed.
 pub async fn ensure_build(reporter: Reporter<'_>) -> Result<InstalledBuild, HorizonError> {
     let build = fetch_latest_build().await?;
+    install_build(&build, reporter).await
+}
+
+pub async fn install_build(
+    build: &HorizonBuild,
+    reporter: Reporter<'_>,
+) -> Result<InstalledBuild, HorizonError> {
     let id = build.id();
     let dir = build_dir(&id)?;
 
@@ -270,7 +277,7 @@ pub async fn ensure_build(reporter: Reporter<'_>) -> Result<InstalledBuild, Hori
         return Ok(InstalledBuild {
             dir,
             id,
-            tag: build.tag,
+            tag: build.tag.clone(),
         });
     }
     if repair_permissions(&dir).await? {
@@ -278,7 +285,7 @@ pub async fn ensure_build(reporter: Reporter<'_>) -> Result<InstalledBuild, Hori
         return Ok(InstalledBuild {
             dir,
             id,
-            tag: build.tag,
+            tag: build.tag.clone(),
         });
     }
 
@@ -288,7 +295,7 @@ pub async fn ensure_build(reporter: Reporter<'_>) -> Result<InstalledBuild, Hori
         return Ok(InstalledBuild {
             dir,
             id,
-            tag: build.tag,
+            tag: build.tag.clone(),
         });
     }
 
@@ -299,7 +306,7 @@ pub async fn ensure_build(reporter: Reporter<'_>) -> Result<InstalledBuild, Hori
 
     // Unpack next to the final folder, then rename it into place.
     let staging = builds_root().join(format!("{id}.staging.{}", lock.token()));
-    if let Err(err) = install_into(&staging, &build).await {
+    if let Err(err) = install_into(&staging, build).await {
         let _ = tokio::fs::remove_dir_all(&staging).await;
         return Err(err);
     }
@@ -319,7 +326,7 @@ pub async fn ensure_build(reporter: Reporter<'_>) -> Result<InstalledBuild, Hori
     Ok(InstalledBuild {
         dir,
         id,
-        tag: build.tag,
+        tag: build.tag.clone(),
     })
 }
 

@@ -34,6 +34,7 @@ simulate_macos_arm64 = ["ql_instances/simulate_macos_arm64"]
 
 [dependencies]
 ql_instances.path = "../crates/ql_instances"
+ql_horizon.path = "../crates/ql_horizon"
 ql_mod_manager.path = "../crates/ql_mod_manager"
 ql_core.path = "../crates/ql_core"
 ql_servers.path = "../crates/ql_servers"

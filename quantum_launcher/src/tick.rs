@@ -21,7 +21,11 @@ impl Launcher {
             State::Launch(_) => {
                 if let Some(receiver) = &mut self.java_recv {
                     if receiver.tick() {
-                        self.state = State::InstallJava;
+                        self.state = if matches!(receiver.first_message, Some(None)) {
+                            State::InstallJava
+                        } else {
+                            State::LaunchProgress
+                        };
                         return Task::none();
                     }
                 }
@@ -109,6 +113,12 @@ impl Launcher {
                     self.java_recv = None;
                     return self.go_to_main_menu(Some(InfoMessage::success("Installed Java")));
                 }
+            }
+            State::LaunchProgress => {
+                let Some(progress) = &mut self.java_recv else {
+                    return self.go_to_main_menu(None);
+                };
+                progress.tick();
             }
             State::ModsDownload(_) => {
                 return MenuModsDownload::tick(self.selected_instance.clone().unwrap());

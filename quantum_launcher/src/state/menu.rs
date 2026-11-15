@@ -201,6 +201,17 @@ pub struct MenuEditInstance {
 
     pub main_class_mode: Option<MainClassMode>,
     pub arg_split_by_space: bool,
+    pub horizon_update: HorizonUpdateState,
+}
+
+#[derive(Debug, Clone, Default)]
+pub enum HorizonUpdateState {
+    #[default]
+    Idle,
+    Checking,
+    UpToDate,
+    Available(ql_horizon::BuildUpdate),
+    Failed(String),
 }
 
 pub struct EditInstanceRename {
@@ -955,6 +966,7 @@ pub enum State {
     InstallOptifine(MenuInstallOptifine),
 
     InstallJava,
+    LaunchProgress,
 
     ModsDownload(MenuModsDownload),
     ModDescription(MenuModDescription),

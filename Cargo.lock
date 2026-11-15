@@ -4282,6 +4282,7 @@ dependencies = [
  "owo-colors",
  "pastey",
  "ql_core",
+ "ql_horizon",
  "ql_instances",
  "ql_mod_manager",
  "ql_packager",

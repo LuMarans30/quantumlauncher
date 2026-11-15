@@ -25,6 +25,8 @@ already owns. QuantumLauncher can install, prepare and launch it.
    Horizon is pinned to, currently 26.3) and runs `horizon-prepare`,
    which builds the game's resources from them (a few minutes, once per
    Horizon build).
+5. When a newer Nightly is published, open the instance's **Edit** tab
+   and press **Check for updates**. See [Updating](#updating).
 
 Horizon has no Java at play time. The Java 25 that `horizon-prepare`
 needs is installed automatically (like for any other instance).
@@ -83,6 +85,31 @@ Deleting an instance only deletes its folder; the shared build and
 prepared resources stay (other instances may use them). Delete
 `horizon/` to reclaim that space.
 
+## Updating
+
+Updating is manual: the **Edit** tab checks for a newer Nightly, shows
+its build id, and installs it on request. Nothing updates behind the
+player's back, because Nightly is experimental upstream.
+
+- The new build is installed beside the old one under
+  `horizon/builds/`; the instance's `config.json` is repointed only
+  after the download, signature, checksum and unpack all succeed.
+- Worlds, options, packs and `horizon-mods/` live in the instance's
+  `.minecraft/` folder and are not touched.
+- A newer build may pin a different Minecraft version. The next launch
+  then downloads those Minecraft files and re-runs `horizon-prepare`
+  (a few minutes), shown on a **Preparing to launch** screen. If the
+  build's preparer asks for a Java version you don't have yet, that is
+  installed first; Horizon itself still runs without Java.
+- Old build and prepared-resource folders are not deleted
+  automatically: another instance may still use them, and a build you
+  already downloaded stays on disk (point the instance's
+  `horizon.build_id` back at it in `config.json` if a Nightly breaks).
+  Delete `horizon/` when you no longer need them.
+- Only the Nightly channel is tracked. An instance whose `build_tag`
+  is something else (for example an imported one) is refused by the
+  update check rather than silently moved to Nightly.
+
 ## What isn't supported yet
 
 - **Mods and packs**: Horizon uses its own `.hmod`/`.hnmod` formats and
@@ -104,9 +131,6 @@ prepared resources stay (other instances may use them). Delete
 - **Pre-launch prefix**: neither the instance's nor the global prefix is
   applied to Horizon (the Java launch path builds it, the Horizon path
   does not), so the edit screen hides it for Horizon instances.
-- **Updating the build**: a new Nightly means creating a new instance.
-  Checking `horizon-prepare --check` happens on every launch, so a
-  broken resources folder is re-prepared automatically.
 - **Offline accounts** need [`ALLOW_OFFLINE`](#offline-play-off-by-default)
   turned on, because upstream asks launchers to require an owning
   Microsoft account.
@@ -125,5 +149,9 @@ prepared resources stay (other instances may use them). Delete
 - `crates/ql_instances` routes instance creation and launching to it:
   a `config.json` with a `horizon` section means "not a Minecraft
   instance", so the Java argument/classpath pipeline is skipped.
+- Updating installs the new build through the same verified path as
+  creation (`install_build`), then rewrites the `horizon` section of
+  `config.json`, keeping fields written by newer launchers. A config
+  write never happens before the build is complete.
 - The instance's account is handed over as the session JSON on standard
   input, never on the command line.

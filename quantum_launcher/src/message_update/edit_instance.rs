@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use iced::Task;
 use ql_core::{
-    Instance, IntoIoError, IntoJsonError, IntoStringError, JsonFileError, LAUNCHER_DIR, err,
+    Instance, InstanceKind, IntoIoError, IntoJsonError, IntoStringError, JsonFileError,
+    LAUNCHER_DIR, err,
     json::{
         InstanceConfigJson,
         instance_config::{CustomJarConfig, MainClassMode},
@@ -14,9 +15,9 @@ use crate::{
     config::sidebar::SidebarSelection,
     state::{
         ADD_JAR_NAME, AutoSaveKind, CustomJarState, EditInstanceMessage, EditInstanceRam,
-        EditInstanceRename, FsWatcher, LaunchTab, Launcher, MainMenuMessage, MenuCreateInstance,
-        MenuEditInstance, MenuLaunch, Message, NONE_JAR_NAME, OPEN_FOLDER_JAR_NAME, ProgressBar,
-        REMOVE_JAR_NAME, State, get_entries,
+        EditInstanceRename, FsWatcher, HorizonUpdateState, InfoMessage, LaunchTab, Launcher,
+        MainMenuMessage, MenuCreateInstance, MenuEditInstance, MenuLaunch, Message, NONE_JAR_NAME,
+        OPEN_FOLDER_JAR_NAME, ProgressBar, REMOVE_JAR_NAME, State, get_entries,
     },
 };
 
@@ -270,6 +271,85 @@ impl Launcher {
                     },
                 ));
             }
+            EditInstanceMessage::HorizonCheckUpdate => {
+                let State::Launch(MenuLaunch {
+                    edit_instance: Some(menu),
+                    ..
+                }) = &mut self.state
+                else {
+                    return Ok(Task::none());
+                };
+                let Some(horizon) = menu.config.horizon.clone() else {
+                    return Ok(Task::none());
+                };
+                if matches!(menu.horizon_update, HorizonUpdateState::Checking) {
+                    return Ok(Task::none());
+                }
+                menu.horizon_update = HorizonUpdateState::Checking;
+
+                return Ok(Task::perform(
+                    async move { ql_horizon::check_update(&horizon).await },
+                    |n| EditInstanceMessage::HorizonChecked(n.strerr()).into(),
+                ));
+            }
+            EditInstanceMessage::HorizonChecked(result) => {
+                if let State::Launch(MenuLaunch {
+                    edit_instance: Some(menu),
+                    ..
+                }) = &mut self.state
+                {
+                    menu.horizon_update = match result {
+                        Ok(Some(update)) => HorizonUpdateState::Available(update),
+                        Ok(None) => HorizonUpdateState::UpToDate,
+                        Err(error) => HorizonUpdateState::Failed(error),
+                    };
+                }
+            }
+            EditInstanceMessage::HorizonUpdate => {
+                let State::Launch(MenuLaunch {
+                    edit_instance: Some(menu),
+                    ..
+                }) = &mut self.state
+                else {
+                    return Ok(Task::none());
+                };
+                let HorizonUpdateState::Available(update) = &menu.horizon_update else {
+                    return Ok(Task::none());
+                };
+                let build = update.latest.clone();
+                let config = menu.config.clone();
+                let instance_name = self.instance().get_name().to_owned();
+
+                let (sender, receiver) = std::sync::mpsc::channel();
+                let bar = ProgressBar::with_recv(receiver);
+                self.state = State::Create(MenuCreateInstance::DownloadingInstance(
+                    bar,
+                    InstanceKind::Client,
+                ));
+
+                return Ok(Task::perform(
+                    async move {
+                        ql_horizon::update_instance(
+                            &instance_name,
+                            config,
+                            build,
+                            ql_horizon::Reporter::Download(&sender),
+                        )
+                        .await
+                    },
+                    |result| match result {
+                        Ok(updated) => Message::Multiple(vec![
+                            MainMenuMessage::ChangeTab(LaunchTab::Edit).into(),
+                            MainMenuMessage::SetInfoMessage(Some(InfoMessage::success(format!(
+                                "Updated Horizon to {}",
+                                updated.build_id
+                            ))))
+                            .into(),
+                        ]),
+                        Err(error) => Message::Error(error.to_string()),
+                    },
+                ));
+            }
         }
         Ok(Task::none())
     }
@@ -308,6 +388,7 @@ impl Launcher {
                     is_editing: false,
                 },
                 arg_split_by_space: true,
+                horizon_update: HorizonUpdateState::Idle,
             });
             Ok(())
         }
@@ -495,6 +576,9 @@ impl EditInstanceMessage {
             EditInstanceMessage::RenameEdit(_) |
             EditInstanceMessage::RenameApply | // ?
             EditInstanceMessage::CustomJarLoaded(_) |
+            EditInstanceMessage::HorizonCheckUpdate |
+            EditInstanceMessage::HorizonChecked(_) |
+            EditInstanceMessage::HorizonUpdate |
             EditInstanceMessage::ConfigSaved(_) => false,
 
             EditInstanceMessage::MemoryChanged(_) |

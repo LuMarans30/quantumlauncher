@@ -377,6 +377,7 @@ impl Launcher {
             | State::ExportInstance(_)
             | State::InstallForge(_)
             | State::InstallJava
+            | State::LaunchProgress
             | State::InstallOptifine(_)
             | State::InstallFabric(_)
             | State::EditMods(_)

@@ -479,6 +479,7 @@ pub struct ProgressBar<T: Progress> {
     pub message: Option<String>,
     pub receiver: Receiver<T>,
     pub progress: T,
+    pub first_message: Option<Option<String>>,
 }
 
 impl<T: Default + Progress> ProgressBar<T> {
@@ -488,6 +489,7 @@ impl<T: Default + Progress> ProgressBar<T> {
             message: None,
             receiver,
             progress: T::default(),
+            first_message: None,
         }
     }
 
@@ -497,6 +499,7 @@ impl<T: Default + Progress> ProgressBar<T> {
             message: Some(msg),
             receiver,
             progress: T::default(),
+            first_message: None,
         }
     }
 }
@@ -504,9 +507,14 @@ impl<T: Default + Progress> ProgressBar<T> {
 impl<T: Progress> ProgressBar<T> {
     pub fn tick(&mut self) -> bool {
         let mut has_ticked = false;
+        self.first_message = None;
         while let Ok(progress) = self.receiver.try_recv() {
+            let message = progress.get_message();
+            if !has_ticked {
+                self.first_message = Some(message.clone());
+            }
             self.num = progress.get_num();
-            self.message = progress.get_message();
+            self.message = message;
             self.progress = progress;
             has_ticked = true;
         }

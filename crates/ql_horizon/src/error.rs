@@ -45,6 +45,13 @@ pub enum HorizonError {
     InvalidName,
     #[error("an instance with that name already exists: {0}")]
     InstanceAlreadyExists(String),
+    #[error("this instance isn't a Horizon instance: {0}")]
+    NotHorizonInstance(String),
+    #[error(
+        "this instance is on the Horizon `{0}` channel\n\nUpdates only track `{tag}`, so this instance can't be updated by the launcher",
+        tag = crate::build::RELEASE_TAG
+    )]
+    UnsupportedUpdateChannel(String),
 
     #[error("this instance points at an invalid Horizon build ({0:?})")]
     InvalidBuildId(String),
@@ -57,7 +64,7 @@ pub enum HorizonError {
     )]
     InvalidSession,
     #[error(
-        "Horizon's build is missing or incomplete in:\n{0}\n\nCreate a new Horizon instance to download it again"
+        "Horizon's build is missing or incomplete in:\n{0}\n\nCheck for an update in the instance's Edit screen, or create a new Horizon instance to download it again"
     )]
     BuildMissing(PathBuf),
     #[error(
@@ -102,7 +109,7 @@ pub enum HorizonError {
     PrepareIncomplete(String),
 
     #[error(
-        "this Horizon build no longer accepts {option} (Launch API {api_version})\n\nIt may have changed the option; update the Horizon build by creating a new instance"
+        "this Horizon build no longer accepts {option} (Launch API {api_version})\n\nIt may have changed the option; check for an update in the instance's Edit screen"
     )]
     UnsupportedOption { option: String, api_version: String },
     #[error(
