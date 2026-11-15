@@ -41,8 +41,7 @@ impl MenuEditInstance {
     ) -> Element<'a> {
         let horizon = self.config.horizon.as_ref();
 
-        // `enable_logger` is Java-only (command builder + server run);
-        // Horizon always pipes its output, so the toggle would be a no-op.
+        // Horizon always captures logs, so it has no logging toggle.
         let debug_logging = column![
             widget::Space::with_height(5),
             widget::checkbox(
@@ -150,9 +149,6 @@ impl MenuEditInstance {
         let current_mode = self.config.global_java_args_enable.unwrap_or(true);
         let prefix_mode = self.config.pre_launch_prefix_mode.unwrap_or_default();
 
-        // Horizon has no Java, and its launch path never applies a
-        // pre-launch prefix (see `docs/HORIZON.md`). Its game arguments and
-        // environment variables do apply, so those stay.
         let is_java = self.config.horizon.is_none();
 
         let sp = || widget::Space::with_height(5);
@@ -502,7 +498,6 @@ fn item_footer(
 ) -> widget::Column<'static, Message, LauncherTheme> {
     match kind {
         InstanceKind::Client => Column::new()
-            // Horizon has no libraries or assets of its own to redownload
             .push_maybe((!is_horizon).then(|| {
                 column![
                     row![

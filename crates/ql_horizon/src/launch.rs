@@ -151,13 +151,16 @@ pub async fn launch(
         api.require("--height")?;
     }
 
-    // Extra arguments come from the instance's settings, which are
-    // semi-untrusted (imported instances): only options this build
-    // promises, never the launcher's own controls.
-    let extra_args: Vec<&String> = config
+    // Imported instances may supply arguments, but not launcher-owned options.
+    let extra_args: Vec<&str> = config
         .game_args
         .as_ref()
-        .map(|args| args.iter().filter(|n| !n.trim().is_empty()).collect())
+        .map(|args| {
+            args.iter()
+                .map(String::as_str)
+                .filter(|n| !n.trim().is_empty())
+                .collect()
+        })
         .unwrap_or_default();
     check_extra_args(&extra_args, &api)?;
 
@@ -198,7 +201,7 @@ pub async fn launch(
 
     if !extra_args.is_empty() {
         info!("Horizon extra arguments: {extra_args:?}");
-        command.args(extra_args.iter().map(|n| n.as_str()));
+        command.args(&extra_args);
     }
 
     apply_env_vars(config, &mut command);
@@ -243,16 +246,13 @@ pub async fn launch(
     })
 }
 
-/// Applies the instance's environment variables, minus the ones the
-/// launcher owns.
 fn apply_env_vars(config: &InstanceConfigJson, command: &mut Command) {
     for (key, value) in allowed_env_vars(config) {
         command.env(key, value);
     }
 }
 
-/// The instance's environment variables, minus the launcher-controlled
-/// ones. Split out so it can be tested without spawning anything.
+/// Filters out launcher-controlled environment variables.
 fn allowed_env_vars(config: &InstanceConfigJson) -> Vec<(String, String)> {
     let Some(vars) = config
         .global_settings
@@ -284,10 +284,10 @@ fn allowed_env_vars(config: &InstanceConfigJson) -> Vec<(String, String)> {
 }
 
 /// Refuses extras the build doesn't promise and the launcher's own options.
-fn check_extra_args(args: &[&String], api: &LaunchApi) -> Result<(), HorizonError> {
-    let mut expects_value: Option<&String> = None;
+fn check_extra_args(args: &[&str], api: &LaunchApi) -> Result<(), HorizonError> {
+    let mut expects_value = None;
 
-    for arg in args {
+    for &arg in args {
         if expects_value.take().is_some() {
             // A value for the previous option; Horizon doesn't accept
             // `--option=value`, so values are separate arguments.
@@ -296,20 +296,20 @@ fn check_extra_args(args: &[&String], api: &LaunchApi) -> Result<(), HorizonErro
 
         if !arg.starts_with('-') {
             return Err(HorizonError::InvalidExtraArgument {
-                argument: (*arg).clone(),
+                argument: arg.to_owned(),
                 reason: "a value has to follow the option it belongs to",
             });
         }
 
-        if LAUNCHER_CONTROLLED_OPTIONS.contains(&arg.as_str()) {
+        if LAUNCHER_CONTROLLED_OPTIONS.contains(&arg) {
             return Err(HorizonError::ForbiddenOption {
-                option: (*arg).clone(),
+                option: arg.to_owned(),
             });
         }
 
         let Some(option) = api.option(arg) else {
             return Err(HorizonError::UnsupportedOption {
-                option: (*arg).clone(),
+                option: arg.to_owned(),
                 api_version: api.launch_api.clone(),
             });
         };
@@ -320,7 +320,7 @@ fn check_extra_args(args: &[&String], api: &LaunchApi) -> Result<(), HorizonErro
 
     if let Some(option) = expects_value {
         return Err(HorizonError::InvalidExtraArgument {
-            argument: option.clone(),
+            argument: option.to_owned(),
             reason: "this option needs a value",
         });
     }
@@ -347,9 +347,7 @@ mod tests {
     }
 
     fn check(args: &[&str], api: &LaunchApi) -> Result<(), HorizonError> {
-        let owned: Vec<String> = args.iter().map(|n| (*n).to_owned()).collect();
-        let refs: Vec<&String> = owned.iter().collect();
-        check_extra_args(&refs, api)
+        check_extra_args(args, api)
     }
 
     #[test]

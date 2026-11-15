@@ -1,27 +1,6 @@
-//! Getting a Horizon build: which release, which archive, is it intact,
-//! and unpacking it.
-//!
-//! Horizon's builds are GitHub releases of `horizon-rust/horizon`, the
-//! newest always under the republished `nightly` tag ([launch
-//! guide](https://github.com/horizon-rust/horizon/blob/main/docs/api/launch-guide.md)).
-//! Each release carries one archive per platform plus `SHA256SUMS` and its
-//! detached Ed25519 signature over `horizon release <tag>\n` followed by the
-//! exact sums bytes, so a list can't be replayed under another tag.
-//!
-//! A build is identified by its archive's SHA-256, not by the tag: two
-//! installers with the same id unpack byte-identical archives, which is
-//! what makes the concurrent swap below safe.
-//!
-//! # Installing safely
-//! - The build id comes from an instance's `config.json`, which is
-//!   semi-untrusted input (imported instances), so it is validated as a
-//!   plain folder name before any path is built from it.
-//! - A build is unpacked into a staging folder and renamed into place only
-//!   once every program and the `build.json` marker are there, so an
-//!   interrupted install can't look installed.
-//! - Every archive entry is checked before it is written (absolute paths,
-//!   `..`, colons, symlinks, hardlinks, special files and duplicates are
-//!   refused).
+//! Downloads signed GitHub releases and installs them through a staging folder.
+//! Build IDs include the archive checksum because `nightly` is republished.
+//! Imported build IDs and archive paths are validated before use.
 
 use std::{
     collections::HashSet,
@@ -280,7 +259,7 @@ fn check_release_url(url: &str, tag: &str) -> Result<(), HorizonError> {
     }
 }
 
-/// Makes sure the current build is installed, downloading it if needed.
+/// Makes sure the latest build is installed, downloading it if needed.
 pub async fn ensure_build(reporter: Reporter<'_>) -> Result<InstalledBuild, HorizonError> {
     let build = fetch_latest_build().await?;
     let id = build.id();
@@ -288,8 +267,6 @@ pub async fn ensure_build(reporter: Reporter<'_>) -> Result<InstalledBuild, Hori
 
     if is_installed(&dir).await {
         info!("Horizon build {id} is already installed");
-        // `build.tag` comes from this fetch, `installed_build` reads the
-        // marker: both name the same release.
         return Ok(InstalledBuild {
             dir,
             id,
@@ -339,9 +316,6 @@ pub async fn ensure_build(reporter: Reporter<'_>) -> Result<InstalledBuild, Hori
         info!("Another Horizon install finished first; using it");
     }
 
-    // Deliberately not re-read from disk: another installer may swap this
-    // folder aside between the rename and a filesystem check. Whatever it
-    // puts there is the same archive, byte for byte.
     Ok(InstalledBuild {
         dir,
         id,
@@ -408,12 +382,12 @@ async fn install_into(staging: &Path, build: &HorizonBuild) -> Result<(), Horizo
     let _ = tokio::fs::remove_file(&archive).await;
 
     for program in REQUIRED_PROGRAMS {
-        if !exists(&program_path(staging, program)).await {
+        if !is_regular_file(&program_path(staging, program)).await {
             return Err(HorizonError::InstalledIncomplete(staging.to_owned()));
         }
     }
     for file in REQUIRED_FILES {
-        if !exists(&staging.join(file)).await {
+        if !is_regular_file(&staging.join(file)).await {
             return Err(HorizonError::InstalledIncomplete(staging.to_owned()));
         }
     }
@@ -447,30 +421,28 @@ async fn is_installed(dir: &Path) -> bool {
     }
     for program in REQUIRED_PROGRAMS {
         let path = program_path(dir, program);
-        if !exists(&path).await || !is_executable(&path).await {
+        if !is_regular_file(&path).await || !is_executable(&path).await {
             return false;
         }
     }
     for file in REQUIRED_FILES {
-        if !exists(&dir.join(file)).await {
+        if !is_regular_file(&dir.join(file)).await {
             return false;
         }
     }
     true
 }
 
-/// Tries to repair a build whose files are present but whose Unix exec
-/// bits were lost (e.g. copied without permissions).
-///
-/// Kept out of [`is_installed`], since a predicate must not mutate the
-/// tree; it only chmods an already-complete build, so no lock is needed.
-/// Returns `true` when the build is installed afterwards.
+/// Repairs lost executable bits on an otherwise complete build.
+/// Returns whether the build is usable afterwards.
 pub(crate) async fn repair_permissions(dir: &Path) -> Result<bool, HorizonError> {
     let complete = read_marker_sync(dir).is_some()
         && REQUIRED_PROGRAMS
             .iter()
-            .all(|program| program_path(dir, program).is_file())
-        && REQUIRED_FILES.iter().all(|file| dir.join(file).is_file());
+            .all(|program| is_regular_file_sync(&program_path(dir, program)))
+        && REQUIRED_FILES
+            .iter()
+            .all(|file| is_regular_file_sync(&dir.join(file)));
     if !complete {
         return Ok(false);
     }
@@ -593,9 +565,11 @@ fn is_installed_sync(dir: &Path) -> bool {
     read_marker_sync(dir).is_some()
         && REQUIRED_PROGRAMS.iter().all(|program| {
             let path = program_path(dir, program);
-            path.is_file() && is_executable_sync(&path)
+            is_regular_file_sync(&path) && is_executable_sync(&path)
         })
-        && REQUIRED_FILES.iter().all(|file| dir.join(file).is_file())
+        && REQUIRED_FILES
+            .iter()
+            .all(|file| is_regular_file_sync(&dir.join(file)))
 }
 
 fn is_executable_sync(path: &Path) -> bool {
@@ -631,8 +605,8 @@ async fn fetch_signed_sums(
     let mut last_error = None;
     for attempt in 0..2 {
         let result = async {
-            let sums = get_text(sums_url).await?;
-            let signatures = get_text(signature_url).await?;
+            let sums = request_text(sums_url).await?;
+            let signatures = request_text(signature_url).await?;
             verify_release_signature(tag, sums.as_bytes(), &signatures)?;
             Ok::<_, HorizonError>(sums)
         }
@@ -702,10 +676,6 @@ pub fn parse_sums(text: &str) -> Result<Vec<(String, String)>, HorizonError> {
         sums.push((name.to_owned(), hash.to_ascii_lowercase()));
     }
     Ok(sums)
-}
-
-async fn get_text(url: &str) -> Result<String, HorizonError> {
-    request_text(url).await
 }
 
 async fn get_json<T>(url: &str) -> Result<T, HorizonError>
@@ -1088,10 +1058,13 @@ async fn find_program_root(dir: &Path) -> Result<PathBuf, HorizonError> {
 }
 
 async fn is_regular_file(path: &Path) -> bool {
-    match tokio::fs::symlink_metadata(path).await {
-        Ok(meta) => meta.file_type().is_file(),
-        Err(_) => false,
-    }
+    tokio::fs::symlink_metadata(path)
+        .await
+        .is_ok_and(|meta| meta.is_file())
+}
+
+fn is_regular_file_sync(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file())
 }
 
 /// Moves everything from `root` into `dir` (its parent).
@@ -1850,6 +1823,38 @@ d4d3aba3e26fdb85a7b56c643f3cd2c3a4a198b0bd757e614f1efdf0654c75dc  horizon-server
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn directories_do_not_count_as_installed_files() {
+        let dir = temp_dir("directory-in-install");
+        for path in [
+            program_path(&dir, "horizon-client"),
+            dir.join("research-lock.json"),
+        ] {
+            write_installed_layout(&dir);
+            std::fs::remove_file(&path).unwrap();
+            std::fs::create_dir(&path).unwrap();
+            assert!(!is_installed(&dir).await);
+            assert!(!is_installed_sync(&dir));
+            assert!(!repair_permissions(&dir).await.unwrap());
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn symlinked_programs_are_not_installed_or_repaired() {
+        let dir = temp_dir("symlink-in-install");
+        write_installed_layout(&dir);
+        let client = program_path(&dir, "horizon-client");
+        let target = dir.join("target");
+        std::fs::rename(&client, &target).unwrap();
+        std::os::unix::fs::symlink(&target, &client).unwrap();
+        assert!(!is_installed(&dir).await);
+        assert!(!is_installed_sync(&dir));
+        assert!(!repair_permissions(&dir).await.unwrap());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[cfg(unix)]

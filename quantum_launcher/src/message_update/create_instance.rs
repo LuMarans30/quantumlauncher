@@ -45,7 +45,7 @@ impl Launcher {
                 iflet!(self, search_box, selected_version, kind, selected_categories, list; {
                     let iter = || list.iter().flatten().flatten()
                         .filter(|n| n.supports_server || !matches!(kind, InstanceKind::Server))
-                        .filter(|n| selected_categories.contains(&n.kind))
+                        .filter(|n| n.kind == ListEntryKind::Horizon || selected_categories.contains(&n.kind))
                         .filter(|n|
                             search_box.trim().is_empty()
                             || n.name.trim().to_lowercase().contains(&search_box.trim().to_lowercase())
@@ -55,7 +55,7 @@ impl Launcher {
                     // - Exact name match
                     // - Name contains search term
                     // - Special lwjgl3 "ports" of normal versions (de-prioritized)
-                    if let Some(sel) = list.iter().flatten().flatten().find(|n| n.name == search_box.trim())
+                    if let Some(sel) = iter().find(|n| n.name == search_box.trim())
                         .or(iter().find(|n| !n.name.ends_with("-lwjgl3"))
                         .or(iter().next())) {
                         *selected_version = sel.clone();
@@ -204,6 +204,12 @@ then go to "Mods->Add File""#,
 
     fn create_instance(&mut self) -> Task<Message> {
         iflet!(self, instance_name, download_assets, selected_version, kind; {
+            if selected_version.name.is_empty()
+                || (matches!(kind, InstanceKind::Server) && !selected_version.supports_server)
+            {
+                return Task::none();
+            }
+
             let already_exists = {
                 let existing_instances = match kind {
                     InstanceKind::Client => self.client_list.as_ref(),

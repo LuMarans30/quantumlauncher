@@ -193,9 +193,9 @@ impl MenuCreateInstanceChoosing {
                 || (self.instance_name.is_empty() && n.contains(&self.selected_version.name))
         });
 
-        // Horizon isn't a Minecraft instance: it downloads no Mojang assets
-        // while being created, and it has no custom JAR settings.
         let is_horizon = self.selected_version.kind == ListEntryKind::Horizon;
+        let valid_version = !self.selected_version.name.is_empty()
+            && (matches!(self.kind, InstanceKind::Client) || self.selected_version.supports_server);
 
         let mmc_import = EXPERIMENTAL_MMC_IMPORT.read().unwrap();
 
@@ -248,7 +248,7 @@ impl MenuCreateInstanceChoosing {
         .push(widget::vertical_space())
         .push(row![
             widget::horizontal_space(),
-            get_create_button(already_exists),
+            get_create_button(already_exists, valid_version),
         ])
         .spacing(12).padding(16);
 
@@ -303,14 +303,24 @@ impl MenuCreateInstanceChoosing {
     }
 }
 
-fn get_create_button(already_exists: bool) -> widget::Tooltip<'static, Message, LauncherTheme> {
-    let create_button = button_with_icon(icons::new(), "Create", 16)
-        .on_press_maybe((!already_exists).then_some(CreateInstanceMessage::Start.into()));
+fn get_create_button(
+    already_exists: bool,
+    valid_version: bool,
+) -> widget::Tooltip<'static, Message, LauncherTheme> {
+    let create_button = button_with_icon(icons::new(), "Create", 16).on_press_maybe(
+        (!already_exists && valid_version).then_some(CreateInstanceMessage::Start.into()),
+    );
 
     if already_exists {
         tooltip(
             create_button,
             "An instance with that name already exists!",
+            Position::FollowCursor,
+        )
+    } else if !valid_version {
+        tooltip(
+            create_button,
+            "Select a supported version first",
             Position::FollowCursor,
         )
     } else {

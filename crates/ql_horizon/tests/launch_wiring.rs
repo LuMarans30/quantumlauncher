@@ -25,6 +25,15 @@ async fn launch_follows_the_launch_api_contract() {
     let root = sandbox();
     let out = root.join("out");
     fs::create_dir_all(&out).unwrap();
+    assert!(
+        ql_horizon::config_for("missing-instance")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let invalid = setup_instance(&root, "invalid-config").await;
+    fs::create_dir(invalid.get_instance_path().join("config.json")).unwrap();
+    assert!(ql_horizon::config_for("invalid-config").await.is_err());
 
     let build_dir = root.join("horizon/builds").join(BUILD_ID);
     fs::create_dir_all(&build_dir).unwrap();
@@ -77,6 +86,12 @@ async fn launch_follows_the_launch_api_contract() {
     // ---- signed in ----
     let instance = setup_instance(&root, "demo").await;
     let instance_config = config(&instance, BUILD_ID).await;
+    let err = ql_horizon::create_instance("demo".to_owned(), ql_horizon::Reporter::Nobody)
+        .await
+        .expect_err("an existing instance must not be overwritten");
+    assert!(matches!(err, HorizonError::InstanceAlreadyExists(_)));
+    assert!(instance.get_instance_path().join("config.json").is_file());
+
     let process = ql_horizon::launch(
         "demo",
         &instance_config,
@@ -93,6 +108,13 @@ async fn launch_follows_the_launch_api_contract() {
     .await
     .expect("launch succeeds");
     wait(&process).await;
+    // A copied Java instance can retain an irrelevant or broken details.json.
+    fs::write(
+        instance.get_instance_path().join("details.json"),
+        "not JSON",
+    )
+    .unwrap();
+    process.read_logs(Vec::new(), None).await.unwrap().unwrap();
 
     let args = fs::read_to_string(out.join("args.txt")).unwrap();
     assert!(

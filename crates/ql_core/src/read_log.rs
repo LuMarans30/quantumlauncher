@@ -16,8 +16,8 @@ use tokio::{
 };
 
 use crate::{
-    Instance, InstanceKind, IoError, JsonError, JsonFileError, err, flags::redact_sensitive_info,
-    json::VersionDetails, print::REDACTION_USERNAME,
+    Instance, InstanceConfigJson, InstanceKind, IoError, JsonError, JsonFileError, err,
+    flags::redact_sensitive_info, json::VersionDetails, print::REDACTION_USERNAME,
 };
 
 // TODO: Use the "newfangled" approach of the Modrinth launcher:
@@ -215,12 +215,10 @@ fn xml_parse(
 }
 
 async fn is_xml(instance: &Instance) -> Result<bool, ReadError> {
-    match VersionDetails::load(instance).await {
-        Ok(json) => Ok(json.logging.is_some()),
-        // Horizon instances' logs are plain text, not log4j XML.
-        Err(JsonFileError::Io(_)) => Ok(false),
-        Err(err) => Err(err.into()),
+    if InstanceConfigJson::read(instance).await?.horizon.is_some() {
+        return Ok(false);
     }
+    Ok(VersionDetails::load(instance).await?.logging.is_some())
 }
 
 /// Represents a line of log output.
