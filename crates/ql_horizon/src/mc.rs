@@ -137,24 +137,58 @@ async fn ensure_file(
         }
     }
 
-    let part = build::unique_part(path);
-    ql_core::download(url).path(&part).await?;
+    download_verified(path, url, expected_sha1).await?.publish()
+}
 
+/// A private download/write that is removed on failure or cancellation. Publish
+/// only after validation, replacing the destination atomically (also on Windows).
+struct PendingFile {
+    path: tempfile::TempPath,
+    destination: PathBuf,
+}
+
+impl PendingFile {
+    async fn new(destination: &Path) -> Result<Self, HorizonError> {
+        let parent = destination.parent().expect("cache file has a parent");
+        tokio::fs::create_dir_all(parent).await.path(parent)?;
+        let path = tempfile::Builder::new()
+            .prefix(".")
+            .suffix(".part")
+            .tempfile_in(parent)
+            .path(destination)?
+            .into_temp_path();
+        Ok(Self {
+            path,
+            destination: destination.to_owned(),
+        })
+    }
+
+    fn publish(self) -> Result<(), HorizonError> {
+        self.path
+            .persist(&self.destination)
+            .map_err(|error| error.error.path(&self.destination))?;
+        Ok(())
+    }
+}
+
+async fn download_verified(
+    path: &Path,
+    url: &str,
+    expected_sha1: Option<&str>,
+) -> Result<PendingFile, HorizonError> {
+    let part = PendingFile::new(path).await?;
+    ql_core::download(url).path(&part.path).await?;
     if let Some(expected) = expected_sha1 {
-        let actual = build::sha1_of_file(&part).await?;
+        let actual = build::sha1_of_file(&part.path).await?;
         if !actual.eq_ignore_ascii_case(expected) {
-            let _ = tokio::fs::remove_file(&part).await;
             return Err(HorizonError::FileHashMismatch {
-                path: path.clone(),
+                path: path.to_owned(),
                 expected: expected.to_owned(),
                 actual,
             });
         }
     }
-
-    let _ = tokio::fs::remove_file(path).await;
-    tokio::fs::rename(&part, path).await.path(path)?;
-    Ok(())
+    Ok(part)
 }
 
 /// Where Mojang serves a version file by its SHA-1 (the `packages`
@@ -172,9 +206,10 @@ async fn fetch_version_json(
     // A pinned copy on disk is as good as a fresh one (checked against the
     // same SHA-1), so re-preparing works offline.
     if exists(path).await {
-        let text = tokio::fs::read_to_string(path).await.path(path)?;
-        if pin.accepts(&sha1_hex(text.as_bytes())) {
-            return Ok(serde_json::from_str(&text).json(text)?);
+        let bytes = tokio::fs::read(path).await.path(path)?;
+        if pin.accepts(&sha1_hex(&bytes)) {
+            return Ok(serde_json::from_slice(&bytes)
+                .json(String::from_utf8_lossy(&bytes).into_owned())?);
         }
         ql_core::err!(
             "the version JSON on disk doesn't match Horizon's pins; downloading it again"
@@ -198,14 +233,9 @@ async fn fetch_version_json(
                 }
 
                 let details: VersionDetails = serde_json::from_str(&text).json(text.clone())?;
-                let parent = path.parent().expect("version json has a folder");
-                tokio::fs::create_dir_all(parent).await.path(parent)?;
-                // Write through `.part`: two preparations of the same
-                // version must never interleave their in-place writes.
-                let part = build::unique_part(path);
-                tokio::fs::write(&part, text).await.path(&part)?;
-                let _ = tokio::fs::remove_file(path).await;
-                tokio::fs::rename(&part, path).await.path(path)?;
+                let part = PendingFile::new(path).await?;
+                tokio::fs::write(&part.path, text).await.path(&part.path)?;
+                part.publish()?;
                 return Ok(details);
             }
             Err(error) => last_error = Some(HorizonError::from(error)),
@@ -345,8 +375,8 @@ async fn ensure_asset_index(
             }
             None => {
                 // No pinned hash (old build): at least prove it parses.
-                let text = tokio::fs::read_to_string(path).await.path(path)?;
-                if serde_json::from_str::<AssetIndex>(&text).is_ok() {
+                let bytes = tokio::fs::read(path).await.path(path)?;
+                if serde_json::from_slice::<AssetIndex>(&bytes).is_ok() {
                     return Ok(());
                 }
                 ql_core::err!("the asset index can't be read; downloading it again");
@@ -355,27 +385,13 @@ async fn ensure_asset_index(
     }
 
     info!("Downloading asset index");
-    let part = build::unique_part(path);
-    ql_core::download(url).path(&part).await?;
-
-    if let Some(expected) = expected_sha1 {
-        let actual = build::sha1_of_file(&part).await?;
-        if !actual.eq_ignore_ascii_case(expected) {
-            let _ = tokio::fs::remove_file(&part).await;
-            return Err(HorizonError::FileHashMismatch {
-                path: path.clone(),
-                expected: expected.to_owned(),
-                actual,
-            });
-        }
-    }
+    let part = download_verified(path, url, expected_sha1).await?;
     // Never install an index that doesn't parse.
-    let text = tokio::fs::read_to_string(&part).await.path(&part)?;
+    let text = tokio::fs::read_to_string(&part.path)
+        .await
+        .path(&part.path)?;
     let _: AssetIndex = serde_json::from_str(&text).json(text)?;
-
-    let _ = tokio::fs::remove_file(path).await;
-    tokio::fs::rename(&part, path).await.path(path)?;
-    Ok(())
+    part.publish()
 }
 
 /// Assets are named by their own SHA-1, so a corrupt or truncated object
@@ -392,17 +408,7 @@ async fn ensure_asset_object(
     }
     let path = objects.join(&hash[0..2]).join(hash);
 
-    if exists(&path).await {
-        let actual = build::sha1_of_file(&path).await?;
-        if actual.eq_ignore_ascii_case(hash) {
-            return Ok(());
-        }
-        ql_core::err!("asset {hash} is damaged; downloading it again");
-        let _ = tokio::fs::remove_file(&path).await;
-    }
-
-    // Fetch it ourselves (rather than `AssetObject::download`) so the
-    // write is atomic.
+    // Use the same verified, atomic publication as jars and libraries.
     let url = asset.url().map(str::to_owned).unwrap_or_else(|| {
         format!(
             "https://resources.download.minecraft.net/{}/{}",
@@ -410,22 +416,7 @@ async fn ensure_asset_object(
             hash
         )
     });
-    let part = build::unique_part(&path);
-    ql_core::download(&url).path(&part).await?;
-
-    let actual = build::sha1_of_file(&part).await?;
-    if !actual.eq_ignore_ascii_case(hash) {
-        let _ = tokio::fs::remove_file(&part).await;
-        return Err(HorizonError::FileHashMismatch {
-            path,
-            expected: hash.to_owned(),
-            actual,
-        });
-    }
-
-    let _ = tokio::fs::remove_file(&path).await;
-    tokio::fs::rename(&part, &path).await.path(&path)?;
-    Ok(())
+    ensure_file(&path, &url, Some(hash), "asset").await
 }
 
 /// Removes `.part` files left by killed downloads (older than a day).
@@ -459,6 +450,78 @@ async fn sweep_stale_parts(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn serve_once(bytes: Vec<u8>) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/file", listener.local_addr().unwrap());
+        let thread = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 4096];
+            assert!(stream.read(&mut request).unwrap() > 0);
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                bytes.len()
+            )
+            .unwrap();
+            stream.write_all(&bytes).unwrap();
+        });
+        (url, thread)
+    }
+
+    #[tokio::test]
+    async fn failed_validation_keeps_destination_and_cleans_parts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.json");
+        std::fs::write(&path, "old copy").unwrap();
+        let (url, server) = serve_once(b"wrong hash".to_vec());
+        assert!(matches!(
+            ensure_file(&path, &url, Some(&sha1_hex(b"expected")), "test").await,
+            Err(HorizonError::FileHashMismatch { .. })
+        ));
+        server.join().unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"old copy");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+
+        let (url, server) = serve_once(b"not JSON".to_vec());
+        assert!(ensure_asset_index(&path, &url, None).await.is_err());
+        server.join().unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"old copy");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn repairs_non_utf8_index_and_reuses_verified_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.json");
+        std::fs::write(&path, [0xff, 0xfe]).unwrap();
+        let bytes = br#"{"objects":{}}"#;
+        let (url, server) = serve_once(bytes.to_vec());
+        ensure_asset_index(&path, &url, None).await.unwrap();
+        server.join().unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        // The server has stopped: a valid cache must not need a network request.
+        ensure_asset_index(&path, &url, Some(&sha1_hex(bytes)))
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn publication_replaces_atomically_and_abandoned_writes_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file");
+        std::fs::write(&path, "old").unwrap();
+        let first = PendingFile::new(&path).await.unwrap();
+        let second = PendingFile::new(&path).await.unwrap();
+        assert_ne!(first.path.as_os_str(), second.path.as_os_str());
+        std::fs::write(&first.path, "new").unwrap();
+        first.publish().unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        drop(second);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
 
     #[test]
     fn hashes_like_sha1sum() {
