@@ -69,11 +69,20 @@ pub fn version_entry() -> ql_core::ListEntry {
 
 /// Reads an instance's [`HorizonConfig`], if it's a Horizon instance.
 pub async fn config_for(instance_name: &str) -> Result<Option<HorizonConfig>, HorizonError> {
+    Ok(instance_config_for(instance_name)
+        .await?
+        .and_then(|config| config.horizon))
+}
+
+/// Reads the full configuration once at the launch boundary.
+pub async fn instance_config_for(
+    instance_name: &str,
+) -> Result<Option<ql_core::InstanceConfigJson>, HorizonError> {
     use ql_core::{Instance, InstanceConfigJson, IoError, JsonFileError};
 
     let instance = Instance::client(instance_name);
     match InstanceConfigJson::read(&instance).await {
-        Ok(config) => Ok(config.horizon),
+        Ok(config) => Ok(Some(config)),
         Err(JsonFileError::Io(IoError::Io { error, .. }))
             if error.kind() == std::io::ErrorKind::NotFound =>
         {

@@ -48,14 +48,7 @@ pub struct PrepareApi {
 
 impl LaunchApi {
     pub fn require(&self, option: &str) -> Result<(), HorizonError> {
-        if self.allows(option) {
-            Ok(())
-        } else {
-            Err(HorizonError::UnsupportedOption {
-                option: option.to_owned(),
-                api_version: self.launch_api.clone(),
-            })
-        }
+        require_option(&self.options, &self.launch_api, option)
     }
 
     #[must_use]
@@ -66,6 +59,43 @@ impl LaunchApi {
     #[must_use]
     pub fn option(&self, option: &str) -> Option<&LaunchOption> {
         self.options.iter().find(|n| n.name == option)
+    }
+}
+
+impl PrepareApi {
+    /// Check every option used for a full preparation before downloading files.
+    pub fn require_preparation_options(&self) -> Result<(), HorizonError> {
+        for option in [
+            "--prepare",
+            "--server-jar",
+            "--version-json",
+            "--client-jar",
+            "--libraries-dir",
+            "--assets-dir",
+            "--output",
+            "--complete",
+            "--progress",
+            "--java-home",
+            "--check",
+        ] {
+            require_option(&self.options, &self.launch_api, option)?;
+        }
+        Ok(())
+    }
+}
+
+fn require_option(
+    options: &[LaunchOption],
+    version: &str,
+    option: &str,
+) -> Result<(), HorizonError> {
+    if options.iter().any(|entry| entry.name == option) {
+        Ok(())
+    } else {
+        Err(HorizonError::UnsupportedOption {
+            option: option.to_owned(),
+            api_version: version.to_owned(),
+        })
     }
 }
 

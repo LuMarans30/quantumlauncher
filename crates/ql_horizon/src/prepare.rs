@@ -79,6 +79,10 @@ pub async fn ensure_prepared(
     }
 
     let api: PrepareApi = api::query(&build.prepare(), "horizon-prepare").await?;
+    api.require_preparation_options()?;
+    if java_version(api.java_major).is_none() {
+        return Err(HorizonError::UnsupportedJava(api.java_major));
+    }
     info!(
         "Preparing Horizon (Launch API {}) from Minecraft {} with Java {}",
         api.launch_api, api.minecraft, api.java_major

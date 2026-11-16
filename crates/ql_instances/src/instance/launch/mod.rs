@@ -1,8 +1,7 @@
 use crate::auth::{AccountData, AccountType};
 use error::GameLaunchError;
 use ql_core::{
-    GenericProgress, Instance, InstanceConfigJson, LaunchedProcess, err,
-    flags::redact_sensitive_info, info,
+    GenericProgress, Instance, LaunchedProcess, err, flags::redact_sensitive_info, info,
 };
 use std::sync::{Arc, mpsc::Sender};
 use tokio::sync::Mutex;
@@ -42,15 +41,17 @@ pub async fn launch(
 
     // Horizon instances launch from their own binary with the account's
     // session; everything below is Java-specific.
-    if let Some(horizon) = ql_horizon::config_for(&instance_name).await? {
+    let config = ql_horizon::instance_config_for(&instance_name).await?;
+    if let Some((config, horizon)) = config
+        .as_ref()
+        .and_then(|config| config.horizon.as_ref().map(|horizon| (config, horizon)))
+    {
         let session = horizon_session(auth.as_ref())?;
-        let instance = Instance::client(&instance_name);
-        let config = InstanceConfigJson::read(&instance).await?;
 
         return ql_horizon::launch(
             &instance_name,
-            &config,
-            &horizon,
+            config,
+            horizon,
             session,
             &username,
             java_install_progress_sender.as_ref(),

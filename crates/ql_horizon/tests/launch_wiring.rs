@@ -260,7 +260,13 @@ async fn launch_follows_the_launch_api_contract() {
                --check)\n\
                  if [ -f \"$state\" ]; then exit 0; else echo 'missing resources'; exit 1; fi ;;\n\
                --launch-api)\n\
-                 echo '{{\"launch_api\":\"0.1.0\",\"minecraft\":\"26.3\",\"java_major\":25,\"options\":[]}}' ;;\n\
+                 echo '{{\"launch_api\":\"0.1.0\",\"minecraft\":\"26.3\",\"java_major\":25,\"options\":[\n\
+                   {{\"name\":\"--prepare\"}},{{\"name\":\"--check\"}},\n\
+                   {{\"name\":\"--server-jar\"}},{{\"name\":\"--version-json\"}},\n\
+                   {{\"name\":\"--client-jar\"}},{{\"name\":\"--libraries-dir\"}},\n\
+                   {{\"name\":\"--assets-dir\"}},{{\"name\":\"--output\"}},\n\
+                   {{\"name\":\"--complete\"}},{{\"name\":\"--progress\"}},\n\
+                   {{\"name\":\"--java-home\"}}]}}' ;;\n\
                --prepare)\n\
                  printf '%s\\n' \"$@\" > \"$args\"\n\
                  echo '{{\"fraction\":0.25}}'\n\
@@ -277,23 +283,25 @@ async fn launch_follows_the_launch_api_contract() {
     let prep_instance = setup_instance(&root, "demo-prepare").await;
     let prep_config = config(&prep_instance, BUILD_ID_PREPARE).await;
 
-    // Offline is refused before the fake preparer is touched.
-    let err = ql_horizon::launch(
-        "demo-prepare",
-        &prep_config,
-        prep_config.horizon.as_ref().unwrap(),
-        None,
-        "Steve",
-        None,
-        None,
-    )
-    .await
-    .expect_err("offline is refused before preparation");
-    assert!(matches!(err, HorizonError::OfflineDisabled), "{err:?}");
-    assert!(
-        !prepare_state.exists() && !prepare_args.exists(),
-        "offline launch must not run --check or --prepare"
-    );
+    // The default offline gate runs before the fake preparer is touched.
+    if !ql_horizon::ALLOW_OFFLINE {
+        let err = ql_horizon::launch(
+            "demo-prepare",
+            &prep_config,
+            prep_config.horizon.as_ref().unwrap(),
+            None,
+            "Steve",
+            None,
+            None,
+        )
+        .await
+        .expect_err("offline is refused before preparation");
+        assert!(matches!(err, HorizonError::OfflineDisabled), "{err:?}");
+        assert!(
+            !prepare_state.exists() && !prepare_args.exists(),
+            "offline launch must not run --check or --prepare"
+        );
+    }
 
     let (progress_sender, progress_receiver) = std::sync::mpsc::channel();
     let process = ql_horizon::launch(
@@ -358,9 +366,25 @@ async fn launch_follows_the_launch_api_contract() {
         "downloads finish before horizon-prepare is invoked"
     );
 
-    // ---- offline is refused by the public API, before any build work ----
+    // ---- incompatible preparers fail before retrying any Minecraft downloads ----
+    write_script(
+        &prep_build.join("horizon-prepare"),
+        "#!/bin/sh\ncase \"$1\" in\n  --check) exit 1 ;;\n  --launch-api) echo '{\"launch_api\":\"test\",\"minecraft\":\"26.3\",\"java_major\":25,\"options\":[]}' ;;\nesac\n",
+    );
+    let installed = ql_horizon::build::installed_build(BUILD_ID_PREPARE)
+        .await
+        .unwrap();
+    let error = ql_horizon::prepare::ensure_prepared(&installed, ql_horizon::Reporter::Nobody)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, HorizonError::UnsupportedOption { option, .. } if option == "--prepare")
+    );
+    assert!(!prepare_args.exists());
+
+    // ---- the public API respects the locally configured offline policy ----
     let instance_config = config(&instance, BUILD_ID).await;
-    let err = ql_horizon::launch(
+    let result = ql_horizon::launch(
         "demo",
         &instance_config,
         instance_config.horizon.as_ref().unwrap(),
@@ -369,12 +393,15 @@ async fn launch_follows_the_launch_api_contract() {
         None,
         None,
     )
-    .await
-    .expect_err("offline play needs a session unless ALLOW_OFFLINE is on");
-    assert!(
-        matches!(err, HorizonError::OfflineDisabled),
-        "expected OfflineDisabled, got: {err:?}"
-    );
+    .await;
+    if ql_horizon::ALLOW_OFFLINE {
+        wait(&result.expect("offline play is enabled")).await;
+        let args = fs::read_to_string(out.join("args.txt")).unwrap();
+        assert!(args.contains("--name\nSteve\n"), "{args}");
+        assert!(!args.contains("--session-stdin"), "{args}");
+    } else {
+        assert!(matches!(result, Err(HorizonError::OfflineDisabled)));
+    }
 
     // The gate runs before build lookup: a bogus id still says offline.
     let bogus = config(&instance, "nightly-not-installed").await;
@@ -389,7 +416,11 @@ async fn launch_follows_the_launch_api_contract() {
     )
     .await
     .expect_err("offline is refused before looking up the build");
-    assert!(matches!(err, HorizonError::OfflineDisabled), "{err:?}");
+    if ql_horizon::ALLOW_OFFLINE {
+        assert!(matches!(err, HorizonError::BuildMissing(_)), "{err:?}");
+    } else {
+        assert!(matches!(err, HorizonError::OfflineDisabled), "{err:?}");
+    }
 
     // And an incomplete session is refused before build lookup too.
     let err = ql_horizon::launch(
