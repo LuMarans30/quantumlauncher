@@ -524,10 +524,18 @@ fn item_horizon_update(update: &HorizonUpdateState) -> Column<'static> {
             check_button("Try again"),
         ],
         HorizonUpdateState::Available(update) => column![
-            widget::text!("A newer Nightly build is available: {}", update.id())
+            widget::text(if update.is_repair() {
+                format!("This build is missing or incomplete: {}", update.id())
+            } else {
+                format!("A newer Nightly build is available: {}", update.id())
+            })
                 .size(12)
                 .style(tsubtitle),
-            button_with_icon(icons::version_download_s(14), "Update Horizon", 13)
+            button_with_icon(
+                icons::version_download_s(14),
+                if update.is_repair() { "Repair Horizon" } else { "Update Horizon" },
+                13,
+            )
                 .padding([4, 8])
                 .on_press(Message::EditInstance(EditInstanceMessage::HorizonUpdate)),
             note(

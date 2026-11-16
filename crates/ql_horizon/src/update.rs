@@ -1,4 +1,4 @@
-//! Moving a Horizon instance to a newer Nightly build.
+//! Updating or repairing a Horizon instance's Nightly build.
 //!
 use ql_core::{DownloadProgress, HorizonProgress, Instance, InstanceConfigJson, info};
 
@@ -15,6 +15,12 @@ pub struct BuildUpdate {
 }
 
 impl BuildUpdate {
+    /// Whether the offered installation repairs the current build.
+    #[must_use]
+    pub fn is_repair(&self) -> bool {
+        self.current == self.latest.id()
+    }
+
     /// The id the instance has after updating.
     #[must_use]
     pub fn id(&self) -> String {
@@ -31,14 +37,23 @@ pub async fn check_update(config: &HorizonConfig) -> Result<Option<BuildUpdate>,
     check_channel(config)?;
 
     let latest = build::fetch_latest_build().await?;
-    if !needs_update(&config.build_id, &latest) {
-        return Ok(None);
+    let dir = build::build_dir(&config.build_id)?;
+    Ok(update_for_installation(config, latest, &dir).await)
+}
+
+async fn update_for_installation(
+    config: &HorizonConfig,
+    latest: HorizonBuild,
+    dir: &std::path::Path,
+) -> Option<BuildUpdate> {
+    if !needs_update(&config.build_id, &latest) && build::is_installed(dir).await {
+        return None;
     }
 
-    Ok(Some(BuildUpdate {
+    Some(BuildUpdate {
         current: config.build_id.clone(),
         latest,
-    }))
+    })
 }
 
 pub async fn update_instance(
@@ -52,10 +67,6 @@ pub async fn update_instance(
         return Err(HorizonError::NotHorizonInstance(instance_name.to_owned()));
     };
     check_channel(&horizon)?;
-
-    if !needs_update(&horizon.build_id, &build) {
-        return Ok(horizon);
-    }
 
     info!(
         "Updating Horizon instance {instance_name}: {} -> {}",
@@ -117,6 +128,51 @@ mod tests {
             asset_url: String::new(),
             sha256: sha.to_owned(),
         }
+    }
+
+    #[tokio::test]
+    async fn current_build_is_only_up_to_date_when_usable() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("build");
+        let latest = build(&"a".repeat(64));
+        let config = HorizonConfig::new("nightly".into(), latest.id(), "26.3".into());
+        let repair = update_for_installation(&config, latest.clone(), &dir)
+            .await
+            .unwrap();
+        assert!(repair.is_repair(), "a missing current build needs repair");
+
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(
+            dir.join("build.json"),
+            r#"{"tag":"nightly","asset":"fake","sha256":"a"}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.join("research-lock.json"), "{}").unwrap();
+        let installed = InstalledBuild {
+            dir: dir.clone(),
+            id: latest.id(),
+            tag: "nightly".into(),
+        };
+        for program in [installed.client(), installed.prepare()] {
+            std::fs::write(&program, "binary").unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+        assert!(
+            update_for_installation(&config, latest.clone(), &dir)
+                .await
+                .is_none()
+        );
+        std::fs::remove_file(installed.client()).unwrap();
+        assert!(
+            update_for_installation(&config, latest, &dir)
+                .await
+                .unwrap()
+                .is_repair()
+        );
     }
 
     #[test]

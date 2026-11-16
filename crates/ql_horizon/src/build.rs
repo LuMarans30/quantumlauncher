@@ -422,7 +422,7 @@ async fn install_into(staging: &Path, build: &HorizonBuild) -> Result<(), Horizo
 }
 
 /// Is this folder a complete, installed build?
-async fn is_installed(dir: &Path) -> bool {
+pub(crate) async fn is_installed(dir: &Path) -> bool {
     if read_marker(dir).await.is_none() {
         return false;
     }

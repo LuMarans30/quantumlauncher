@@ -91,6 +91,12 @@ Updating is manual: the **Edit** tab checks for a newer Nightly, shows
 its build id, and installs it on request. Nothing updates behind the
 player's back, because Nightly is experimental upstream.
 
+If the current build is missing or incomplete, **Check for updates** also
+checks its installation. When it is still the latest Nightly, **Repair
+Horizon** reinstalls that same build through the verified installer. If
+Nightly has moved on, install the offered newer build instead. Neither
+action requires recreating the instance.
+
 - The new build is installed beside the old one under
   `horizon/builds/`; the instance's `config.json` is repointed only
   after the download, signature, checksum and unpack all succeed.
