@@ -86,7 +86,11 @@ impl Launcher {
         };
 
         let (sender, receiver) = std::sync::mpsc::channel();
-        self.java_recv = Some(ProgressBar::with_recv(receiver));
+        let mut progress = ProgressBar::with_recv(receiver);
+        if matches!(&self.state, State::Launch(menu) if menu.is_horizon) {
+            progress.launch_stage = crate::state::LaunchProgressStage::HorizonPreparation;
+        }
+        self.java_recv = Some(progress);
 
         let global_settings = self.config.global_settings.clone();
         let extra_java_args = self.config.extra_java_args.clone().unwrap_or_default();

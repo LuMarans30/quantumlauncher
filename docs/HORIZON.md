@@ -120,7 +120,8 @@ action requires recreating the instance.
 
 - **Mods and packs**: Horizon uses its own `.hmod`/`.hnmod` formats and
   its own registry. QuantumLauncher's mod store, mod manager and modpack
-  import are Java-shaped and don't apply. The game folder's
+  import are Java-shaped and don't apply. The **Mods** button is hidden
+  for Horizon instances, and mod-management shortcuts are ignored. The game folder's
   `horizon-mods/`, `resourcepacks/`, `shaderpacks/` and `datapacks/`
   can still be filled by hand.
 - **Horizon servers**: only client instances are created for now, even

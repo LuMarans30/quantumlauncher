@@ -375,11 +375,18 @@ impl Launcher {
         fn load_edit_instance_inner(
             edit_instance: &mut Option<MenuEditInstance>,
             selected_instance: &Instance,
+            is_horizon: &mut bool,
+            open_editor: bool,
         ) -> Result<(), JsonFileError> {
             let config_path = selected_instance.get_instance_path().join("config.json");
 
             let config = std::fs::read_to_string(&config_path).path(config_path)?;
             let config: InstanceConfigJson = serde_json::from_str(&config).json(config)?;
+            *is_horizon = config.horizon.is_some();
+            if !open_editor {
+                *edit_instance = None;
+                return Ok(());
+            }
 
             let slider_value = f32::log2(config.ram_in_mb as f32);
             let memory_mb = config.ram_in_mb;
@@ -416,14 +423,24 @@ impl Launcher {
         }
 
         if let State::Launch(MenuLaunch {
-            tab, edit_instance, ..
+            tab,
+            edit_instance,
+            is_horizon,
+            ..
         }) = &mut self.state
         {
-            if let (LaunchTab::Edit, Some(selected_instance)) =
-                (new_tab.unwrap_or(*tab), self.selected_instance.as_ref())
-            {
-                self.autosave.insert(AutoSaveKind::InstanceConfig); // prevent it from saving *right now*
-                if let Err(err) = load_edit_instance_inner(edit_instance, selected_instance) {
+            *is_horizon = false;
+            if let Some(selected_instance) = self.selected_instance.as_ref() {
+                let open_editor = matches!(new_tab.unwrap_or(*tab), LaunchTab::Edit);
+                if open_editor {
+                    self.autosave.insert(AutoSaveKind::InstanceConfig); // prevent it from saving *right now*
+                }
+                if let Err(err) = load_edit_instance_inner(
+                    edit_instance,
+                    selected_instance,
+                    is_horizon,
+                    open_editor,
+                ) {
                     err!("Could not open edit instance menu: {err}");
                     *edit_instance = None;
                 }

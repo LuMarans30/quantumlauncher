@@ -113,6 +113,10 @@ impl Launcher {
             let instance = this.selected_instance.as_ref().unwrap();
 
             let config = InstanceConfigJson::read(instance).await.strerr()?;
+            // Horizon has no Java version details or compatible mod manager.
+            if config.horizon.is_some() {
+                return Ok(Task::none());
+            }
             let details = Box::new(VersionDetails::load(instance).await.strerr()?);
             let mod_index = ModIndex::load(instance).await.strerr()?;
 

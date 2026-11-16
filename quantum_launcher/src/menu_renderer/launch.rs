@@ -162,15 +162,13 @@ impl Launcher {
     fn get_tab_main<'a>(&'a self, menu: &'a MenuLaunch, selected: &'a Instance) -> Element<'a> {
         let is_running = self.is_process_running(selected);
 
-        let main_buttons = row![
-            if selected.is_server() {
-                self.get_server_play_button(selected)
-            } else {
-                self.get_client_play_button(selected)
-            },
-            Self::get_mods_button(),
-            Self::get_files_button(selected),
-        ]
+        let main_buttons = row![if selected.is_server() {
+            self.get_server_play_button(selected)
+        } else {
+            self.get_client_play_button(selected)
+        },]
+        .push_maybe((!menu.is_horizon).then(|| -> Element<'a> { Self::get_mods_button().into() }))
+        .push(Self::get_files_button(selected))
         .spacing(5)
         .wrap();
 

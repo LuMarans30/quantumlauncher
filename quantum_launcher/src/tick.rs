@@ -21,10 +21,13 @@ impl Launcher {
             State::Launch(_) => {
                 if let Some(receiver) = &mut self.java_recv {
                     if receiver.tick() {
-                        self.state = if matches!(receiver.first_message, Some(None)) {
-                            State::InstallJava
-                        } else {
-                            State::LaunchProgress
+                        self.state = match receiver.launch_stage {
+                            crate::state::LaunchProgressStage::JavaInstallation => {
+                                State::InstallJava
+                            }
+                            crate::state::LaunchProgressStage::HorizonPreparation => {
+                                State::LaunchProgress
+                            }
                         };
                         return Task::none();
                     }

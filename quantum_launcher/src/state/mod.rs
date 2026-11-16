@@ -27,6 +27,8 @@ use crate::{
     stylesheet::styles::LauncherTheme,
 };
 
+#[cfg(test)]
+mod horizon_tests;
 mod images;
 mod menu;
 mod message;
@@ -229,7 +231,7 @@ impl Launcher {
                 )
             });
 
-        Ok(Self {
+        let mut launcher = Self {
             selected_instance,
             state,
             config,
@@ -268,7 +270,11 @@ impl Launcher {
             autosave: HashSet::new(),
             images: ImageState::default(),
             modifiers_pressed: iced::keyboard::Modifiers::empty(),
-        })
+        };
+        if matches!(launcher.state, State::Launch(_)) {
+            launcher.load_edit_instance(None);
+        }
+        Ok(launcher)
     }
 
     pub fn with_error(error: impl Display) -> Self {
@@ -358,6 +364,7 @@ impl Launcher {
             Task::none()
         };
         self.state = State::Launch(menu_launch);
+        self.load_edit_instance(None);
 
         t
     }
@@ -474,12 +481,19 @@ pub async fn get_entries(kind: InstanceKind) -> Res<(Vec<String>, InstanceKind)>
     ))
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LaunchProgressStage {
+    #[default]
+    JavaInstallation,
+    HorizonPreparation,
+}
+
 pub struct ProgressBar<T: Progress> {
     pub num: f32,
     pub message: Option<String>,
     pub receiver: Receiver<T>,
     pub progress: T,
-    pub first_message: Option<Option<String>>,
+    pub launch_stage: LaunchProgressStage,
 }
 
 impl<T: Default + Progress> ProgressBar<T> {
@@ -489,7 +503,7 @@ impl<T: Default + Progress> ProgressBar<T> {
             message: None,
             receiver,
             progress: T::default(),
-            first_message: None,
+            launch_stage: LaunchProgressStage::default(),
         }
     }
 
@@ -499,7 +513,7 @@ impl<T: Default + Progress> ProgressBar<T> {
             message: Some(msg),
             receiver,
             progress: T::default(),
-            first_message: None,
+            launch_stage: LaunchProgressStage::default(),
         }
     }
 }
@@ -507,14 +521,9 @@ impl<T: Default + Progress> ProgressBar<T> {
 impl<T: Progress> ProgressBar<T> {
     pub fn tick(&mut self) -> bool {
         let mut has_ticked = false;
-        self.first_message = None;
         while let Ok(progress) = self.receiver.try_recv() {
-            let message = progress.get_message();
-            if !has_ticked {
-                self.first_message = Some(message.clone());
-            }
             self.num = progress.get_num();
-            self.message = message;
+            self.message = progress.get_message();
             self.progress = progress;
             has_ticked = true;
         }

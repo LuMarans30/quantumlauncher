@@ -231,7 +231,7 @@ then go to "Mods->Add File""#,
                 message: Some("Started download".to_owned()),
                 receiver,
                 progress: DownloadProgress::DownloadingJsonManifest,
-                first_message: None,
+                launch_stage: Default::default(),
             };
 
             let version = selected_version.clone();

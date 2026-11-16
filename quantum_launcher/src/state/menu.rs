@@ -107,6 +107,8 @@ pub struct MenuLaunch {
     pub login_progress: Option<ProgressBar<GenericProgress>>,
     pub tab: LaunchTab,
     pub edit_instance: Option<MenuEditInstance>,
+    /// Cached on selection/tab changes; the edit menu only exists on its own tab.
+    pub is_horizon: bool,
     pub notes: Option<InstanceNotes>,
     pub log_state: Option<LogState>,
     pub modal: Option<LaunchModal>,
@@ -156,6 +158,7 @@ impl MenuLaunch {
             message,
             tab: LaunchTab::default(),
             edit_instance: None,
+            is_horizon: false,
             login_progress: None,
             sidebar_scroll: SidebarScroll::default(),
             sidebar_grid_state,
