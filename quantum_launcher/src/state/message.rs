@@ -108,7 +108,10 @@ pub enum EditInstanceMessage {
     CustomJarLoaded(Res<Vec<String>>),
 
     HorizonCheckUpdate,
-    HorizonChecked(Res<Option<ql_horizon::BuildUpdate>>),
+    HorizonChecked(
+        super::HorizonUpdateRequest,
+        Res<Option<ql_horizon::BuildUpdate>>,
+    ),
     HorizonUpdate,
 }
 

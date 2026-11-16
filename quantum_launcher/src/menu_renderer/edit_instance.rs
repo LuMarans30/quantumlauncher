@@ -510,7 +510,7 @@ fn item_horizon_update(update: &HorizonUpdateState) -> Column<'static> {
                 "Nightly is republished often. Checking asks GitHub for the release's signed checksum list; the build itself is only downloaded when you update."
             ),
         ],
-        HorizonUpdateState::Checking => column![
+        HorizonUpdateState::Checking(_) => column![
             note("Checking for a newer Nightly build..."),
         ],
         HorizonUpdateState::UpToDate => column![

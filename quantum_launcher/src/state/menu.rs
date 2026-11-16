@@ -208,10 +208,85 @@ pub struct MenuEditInstance {
 pub enum HorizonUpdateState {
     #[default]
     Idle,
-    Checking,
+    Checking(HorizonUpdateRequest),
     UpToDate,
     Available(ql_horizon::BuildUpdate),
     Failed(String),
+}
+
+/// Identifies both the configuration snapshot and a particular check, including
+/// checks started after closing and reopening the same instance's edit menu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HorizonUpdateRequest {
+    pub instance: Instance,
+    pub build_id: String,
+    generation: u64,
+}
+
+impl HorizonUpdateRequest {
+    pub fn new(instance: Instance, build_id: String) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        Self {
+            instance,
+            build_id,
+            generation: NEXT.fetch_add(1, Ordering::Relaxed),
+        }
+    }
+}
+
+impl HorizonUpdateState {
+    pub fn finish_check(
+        &mut self,
+        request: &HorizonUpdateRequest,
+        instance: Option<&Instance>,
+        horizon: Option<&ql_horizon::HorizonConfig>,
+        result: Result<Option<ql_horizon::BuildUpdate>, String>,
+    ) {
+        if !matches!(self, Self::Checking(active) if active == request)
+            || instance != Some(&request.instance)
+            || horizon.is_none_or(|config| config.build_id != request.build_id)
+        {
+            return;
+        }
+        *self = match result {
+            Ok(Some(update)) => Self::Available(update),
+            Ok(None) => Self::UpToDate,
+            Err(error) => Self::Failed(error),
+        };
+    }
+}
+
+#[cfg(test)]
+mod horizon_update_tests {
+    use super::*;
+
+    fn horizon(id: &str) -> ql_horizon::HorizonConfig {
+        ql_horizon::HorizonConfig::new("nightly".into(), id.into(), "26.3".into())
+    }
+
+    #[test]
+    fn update_checks_are_bound_to_instance_build_and_request() {
+        let a = Instance::client("A");
+        let b = Instance::client("B");
+        let request = HorizonUpdateRequest::new(a.clone(), "old".into());
+        let newer = HorizonUpdateRequest::new(a.clone(), "old".into());
+        let config = horizon("old");
+        let mut state = HorizonUpdateState::Checking(request.clone());
+        state.finish_check(&request, Some(&b), Some(&config), Ok(None));
+        assert!(matches!(state, HorizonUpdateState::Checking(_)));
+        state.finish_check(&request, Some(&a), Some(&horizon("new")), Ok(None));
+        assert!(matches!(state, HorizonUpdateState::Checking(_)));
+
+        state = HorizonUpdateState::Checking(newer.clone());
+        state.finish_check(&request, Some(&a), Some(&config), Err("stale".into()));
+        assert!(matches!(&state, HorizonUpdateState::Checking(active) if active == &newer));
+        state.finish_check(&newer, Some(&a), Some(&config), Ok(None));
+        assert!(matches!(state, HorizonUpdateState::UpToDate));
+        // Duplicate completion cannot replace an already-applied result.
+        state.finish_check(&newer, Some(&a), Some(&config), Err("duplicate".into()));
+        assert!(matches!(state, HorizonUpdateState::UpToDate));
+    }
 }
 
 pub struct EditInstanceRename {

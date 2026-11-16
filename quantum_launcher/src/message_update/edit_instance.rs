@@ -15,9 +15,10 @@ use crate::{
     config::sidebar::SidebarSelection,
     state::{
         ADD_JAR_NAME, AutoSaveKind, CustomJarState, EditInstanceMessage, EditInstanceRam,
-        EditInstanceRename, FsWatcher, HorizonUpdateState, InfoMessage, LaunchTab, Launcher,
-        MainMenuMessage, MenuCreateInstance, MenuEditInstance, MenuLaunch, Message, NONE_JAR_NAME,
-        OPEN_FOLDER_JAR_NAME, ProgressBar, REMOVE_JAR_NAME, State, get_entries,
+        EditInstanceRename, FsWatcher, HorizonUpdateRequest, HorizonUpdateState, InfoMessage,
+        LaunchTab, Launcher, MainMenuMessage, MenuCreateInstance, MenuEditInstance, MenuLaunch,
+        Message, NONE_JAR_NAME, OPEN_FOLDER_JAR_NAME, ProgressBar, REMOVE_JAR_NAME, State,
+        get_entries,
     },
 };
 
@@ -272,6 +273,9 @@ impl Launcher {
                 ));
             }
             EditInstanceMessage::HorizonCheckUpdate => {
+                let Some(instance) = self.selected_instance.clone() else {
+                    return Ok(Task::none());
+                };
                 let State::Launch(MenuLaunch {
                     edit_instance: Some(menu),
                     ..
@@ -282,27 +286,31 @@ impl Launcher {
                 let Some(horizon) = menu.config.horizon.clone() else {
                     return Ok(Task::none());
                 };
-                if matches!(menu.horizon_update, HorizonUpdateState::Checking) {
+                if matches!(menu.horizon_update, HorizonUpdateState::Checking(_)) {
                     return Ok(Task::none());
                 }
-                menu.horizon_update = HorizonUpdateState::Checking;
+                let request = HorizonUpdateRequest::new(instance, horizon.build_id.clone());
+                menu.horizon_update = HorizonUpdateState::Checking(request.clone());
 
                 return Ok(Task::perform(
                     async move { ql_horizon::check_update(&horizon).await },
-                    |n| EditInstanceMessage::HorizonChecked(n.strerr()).into(),
+                    move |n| {
+                        EditInstanceMessage::HorizonChecked(request.clone(), n.strerr()).into()
+                    },
                 ));
             }
-            EditInstanceMessage::HorizonChecked(result) => {
+            EditInstanceMessage::HorizonChecked(request, result) => {
                 if let State::Launch(MenuLaunch {
                     edit_instance: Some(menu),
                     ..
                 }) = &mut self.state
                 {
-                    menu.horizon_update = match result {
-                        Ok(Some(update)) => HorizonUpdateState::Available(update),
-                        Ok(None) => HorizonUpdateState::UpToDate,
-                        Err(error) => HorizonUpdateState::Failed(error),
-                    };
+                    menu.horizon_update.finish_check(
+                        &request,
+                        self.selected_instance.as_ref(),
+                        menu.config.horizon.as_ref(),
+                        result,
+                    );
                 }
             }
             EditInstanceMessage::HorizonUpdate => {
@@ -316,6 +324,15 @@ impl Launcher {
                 let HorizonUpdateState::Available(update) = &menu.horizon_update else {
                     return Ok(Task::none());
                 };
+                if menu
+                    .config
+                    .horizon
+                    .as_ref()
+                    .is_none_or(|h| h.build_id != update.current)
+                {
+                    menu.horizon_update = HorizonUpdateState::Idle;
+                    return Ok(Task::none());
+                }
                 let build = update.latest.clone();
                 let config = menu.config.clone();
                 let instance_name = self.instance().get_name().to_owned();
@@ -577,7 +594,7 @@ impl EditInstanceMessage {
             EditInstanceMessage::RenameApply | // ?
             EditInstanceMessage::CustomJarLoaded(_) |
             EditInstanceMessage::HorizonCheckUpdate |
-            EditInstanceMessage::HorizonChecked(_) |
+            EditInstanceMessage::HorizonChecked(..) |
             EditInstanceMessage::HorizonUpdate |
             EditInstanceMessage::ConfigSaved(_) => false,
 
