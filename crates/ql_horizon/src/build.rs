@@ -882,7 +882,13 @@ fn extract_zip(archive: &Path, output: &Path) -> Result<(), HorizonError> {
             error: error.to_string(),
         })?;
 
-        let name = entry.name().to_owned();
+        let name = entry
+            .name()
+            .map_err(|error| HorizonError::Archive {
+                path: archive.to_owned(),
+                error: error.to_string(),
+            })?
+            .into_owned();
         if name.contains('\\') {
             return Err(HorizonError::UnsafeArchive {
                 entry: name,
@@ -1311,7 +1317,7 @@ fn owner_pid(owner: &str) -> Option<u32> {
 async fn owner_is_alive(pid: u32, started: Option<u64>) -> Option<bool> {
     tokio::task::spawn_blocking(move || {
         let pid = sysinfo::Pid::from_u32(pid);
-        let mut system = sysinfo::System::new();
+        let mut system = sysinfo::System::new().ok()?;
         system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
         Some(system.process(pid).is_some_and(|process| {
             process.status() != sysinfo::ProcessStatus::Zombie
@@ -1326,7 +1332,7 @@ async fn owner_is_alive(pid: u32, started: Option<u64>) -> Option<bool> {
 async fn process_start_time(pid: u32) -> Option<u64> {
     tokio::task::spawn_blocking(move || {
         let pid = sysinfo::Pid::from_u32(pid);
-        let mut system = sysinfo::System::new();
+        let mut system = sysinfo::System::new().ok()?;
         system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
         system.process(pid).map(sysinfo::Process::start_time)
     })

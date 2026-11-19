@@ -46,13 +46,12 @@ impl Launcher {
                     None
                 };
 
-                if let Some(config) = edit_config {
-                    if self.autosave.insert(AutoSaveKind::InstanceConfig)
-                        || self.tick_timer % 5 == 0
+                if let Some(config) = edit_config
+                    && (self.autosave.insert(AutoSaveKind::InstanceConfig)
+                        || self.tick_timer.is_multiple_of(5))
                     {
                         self.autosave_instance_config(config, &mut commands);
                     }
-                }
 
                 for (instance, process) in &mut self.processes {
                     let log_state = if let State::Launch(menu) = &mut self.state {
@@ -149,11 +148,10 @@ impl Launcher {
                     ..
                 } => {
                     optifine_install_progress.tick();
-                    if let Some(java_progress) = java_install_progress {
-                        if java_progress.tick() {
+                    if let Some(java_progress) = java_install_progress
+                        && java_progress.tick() {
                             *is_java_being_installed = true;
                         }
-                    }
                 }
             },
             State::ManagePresets(menu) => {
@@ -198,13 +196,12 @@ impl Launcher {
     }
 
     pub fn tick_interval(&self) -> u64 {
-        if let State::Launch(menu) = &self.state {
-            if let Some(LaunchModal::SDragging { .. }) = &menu.modal {
+        if let State::Launch(menu) = &self.state
+            && let Some(LaunchModal::SDragging { .. }) = &menu.modal {
                 // Faster tick rate for smoother auto-scrolling
                 // while dragging in the sidebar
                 return 15;
             }
-        }
 
         self.config.c_idle_fps()
     }
