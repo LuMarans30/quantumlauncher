@@ -26,22 +26,31 @@ pub async fn upload_log(content: String, instance: Instance) -> Result<String, S
         return Err("Cannot upload empty log".to_owned());
     }
 
-    let (details, config) = tokio::try_join!(
-        VersionDetails::load(&instance),
-        InstanceConfigJson::read(&instance)
-    )
-    .strerr()?;
+    let config = InstanceConfigJson::read(&instance).await.strerr()?;
+
+    // Horizon instances have no `details.json`, so their metadata comes from
+    // the package's own config instead of the Java version details.
+    let (minecraft_version, loader) = if let Some(horizon) = &config.horizon {
+        (
+            horizon.minecraft_version.clone(),
+            Some("Horizon".to_owned()),
+        )
+    } else {
+        let details = VersionDetails::load(&instance).await.strerr()?;
+        let loader = (config.mod_type != Loader::Vanilla).then(|| config.mod_type.to_string());
+        (details.id, loader)
+    };
 
     let mut metadata = vec![Metadata {
         key: "version",
-        value: details.id,
+        value: minecraft_version,
         label: "Minecraft version",
     }];
 
-    if config.mod_type != Loader::Vanilla {
+    if let Some(loader) = loader {
         metadata.push(Metadata {
             key: "loader",
-            value: config.mod_type.to_string(),
+            value: loader,
             label: "Mod Loader",
         });
     }

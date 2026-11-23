@@ -119,7 +119,18 @@ pub fn list_instances(
                             cmds_version.push_str(&json.id);
                         }
                         Err(err) => {
-                            err!("{err}");
+                            // Horizon instances have no `details.json`; their
+                            // version comes from the package's own config.
+                            let horizon_version = runtime
+                                .block_on(InstanceConfigJson::read_from_dir(&instance_dir))
+                                .ok()
+                                .and_then(|config| config.horizon)
+                                .map(|horizon| horizon.minecraft_version);
+
+                            match horizon_version {
+                                Some(version) => cmds_version.push_str(&version),
+                                None => err!("{err}"),
+                            }
                         }
                     }
                     cmds_version.push('\n');
@@ -134,6 +145,11 @@ pub fn list_instances(
                                 continue;
                             }
                         };
+                    if config_json.horizon.is_some() {
+                        writeln!(cmds_loader, "{}", "Horizon".bright_magenta())?;
+                        continue;
+                    }
+
                     let m = config_json.mod_type;
 
                     match m {
@@ -297,16 +313,22 @@ pub async fn loader(cmd: QLoader, kind: InstanceKind) -> Result<(), Box<dyn std:
     match cmd {
         QLoader::Info { instance } => {
             let json = InstanceConfigJson::read(&Instance::new(&instance, kind)).await?;
-            println!("Kind: {}", json.mod_type);
-            if let Some(info) = json.mod_type_info {
-                if let Some(version) = info.version {
-                    println!("Version: {version}");
-                }
-                if let Some(backend) = info.backend_implementation {
-                    println!("Backend: {backend}");
-                }
-                if let Some(jar) = info.optifine_jar {
-                    println!("OptiFine Installation: {jar}");
+            if let Some(horizon) = &json.horizon {
+                println!("Kind: Horizon");
+                println!("Minecraft version: {}", horizon.minecraft_version);
+                println!("Build: {} ({})", horizon.build_tag, horizon.build_id);
+            } else {
+                println!("Kind: {}", json.mod_type);
+                if let Some(info) = json.mod_type_info {
+                    if let Some(version) = info.version {
+                        println!("Version: {version}");
+                    }
+                    if let Some(backend) = info.backend_implementation {
+                        println!("Backend: {backend}");
+                    }
+                    if let Some(jar) = info.optifine_jar {
+                        println!("OptiFine Installation: {jar}");
+                    }
                 }
             }
         }
@@ -332,7 +354,17 @@ pub async fn loader(cmd: QLoader, kind: InstanceKind) -> Result<(), Box<dyn std:
             };
 
             let instance = Instance::new(&instance, kind);
-            let mt = InstanceConfigJson::read(&instance).await?.mod_type;
+            let config = InstanceConfigJson::read(&instance).await?;
+
+            if config.horizon.is_some() {
+                err!(
+                    r"This is a Horizon instance, which doesn't use Java mod loaders.
+    Manage its content from the launcher's Horizon content menu instead."
+                );
+                exit(1);
+            }
+
+            let mt = config.mod_type;
 
             if mt == loader {
                 err!("{mt} is already installed!");

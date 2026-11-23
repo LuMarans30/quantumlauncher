@@ -5,7 +5,7 @@ use filthy_rich::{
 };
 use iced::{Task, futures::executor::block_on};
 
-use ql_core::{Instance, err, json::VersionDetails, pt};
+use ql_core::{Instance, InstanceConfigJson, err, json::VersionDetails, pt};
 
 use crate::{
     config::discord_rpc::PresenceStatusDisplayType,
@@ -195,26 +195,37 @@ impl Launcher {
 
         Task::perform(
             async move {
-                if let Ok(version_details) = VersionDetails::load(&selected_instance).await
-                    && let Some(c) = client {
-                        let instance = selected_instance.get_name();
-                        let minecraft_vers = version_details.get_id();
+                let minecraft_vers = match VersionDetails::load(&selected_instance).await {
+                    Ok(version_details) => version_details.get_id().to_owned(),
+                    // Horizon instances have no `details.json`; their version
+                    // comes from the package's own config instead.
+                    Err(_) => match InstanceConfigJson::read(&selected_instance).await {
+                        Ok(config) => match config.horizon {
+                            Some(horizon) => horizon.minecraft_version,
+                            None => return,
+                        },
+                        Err(_) => return,
+                    },
+                };
 
-                        let activity = bake_activity(
-                            name,
-                            sdt,
-                            competing,
-                            details.map(|f| f.substitute(instance, minecraft_vers)),
-                            details_url,
-                            state.map(|f| f.substitute(instance, minecraft_vers)),
-                            state_url,
-                        );
+                if let Some(c) = client {
+                    let instance = selected_instance.get_name();
 
-                        match activity {
-                            Ok(a) => _ = c.set_activity(a).await,
-                            Err(e) => err!(no_log, "Failed to bake RPC game update activity: {e}"),
-                        }
+                    let activity = bake_activity(
+                        name,
+                        sdt,
+                        competing,
+                        details.map(|f| f.substitute(instance, &minecraft_vers)),
+                        details_url,
+                        state.map(|f| f.substitute(instance, &minecraft_vers)),
+                        state_url,
+                    );
+
+                    match activity {
+                        Ok(a) => _ = c.set_activity(a).await,
+                        Err(e) => err!(no_log, "Failed to bake RPC game update activity: {e}"),
                     }
+                }
             },
             |()| Message::Nothing,
         )
