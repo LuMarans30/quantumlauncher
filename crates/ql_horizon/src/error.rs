@@ -141,6 +141,11 @@ pub enum HorizonError {
     #[error("couldn't understand Horizon's reply:\n{0}")]
     BadApiReply(String),
 
+    #[error(
+        "This is a native Horizon mod. Quantum Launcher supports content and WebAssembly mods, but not native mods."
+    )]
+    UnsupportedNativeMod,
+
     #[error("{ERR_PREFIX}{0}")]
     Message(String),
 }

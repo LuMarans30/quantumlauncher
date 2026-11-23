@@ -22,6 +22,7 @@ use ql_core::{DownloadProgress, GenericProgress, Progress, err};
 
 pub mod api;
 pub mod build;
+pub mod content;
 mod error;
 mod instance;
 mod launch;
