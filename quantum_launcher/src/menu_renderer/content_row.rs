@@ -8,15 +8,43 @@ use iced::{
     widget::{self, row},
 };
 
-pub(super) const PADDING: iced::Padding = iced::Padding {
+const PADDING: iced::Padding = iced::Padding {
     top: 4.,
     bottom: 6.,
     right: 15.,
     left: 20.,
 };
-pub(super) const SPACING: u16 = 16;
+const SPACING: u16 = 16;
 pub(crate) const ICON_SIZE: f32 = 18.;
-pub(super) const MONO_CHAR_WIDTH: f32 = 7.2;
+
+/// Non-toggleable content types in the installed list.
+pub(crate) enum ContentBadge {
+    Shader,
+    ResourcePack,
+    ModPack,
+    DataPack,
+}
+
+impl ContentBadge {
+    pub fn view(self) -> Element<'static> {
+        let (label, hint, color) = match self {
+            Self::Shader => ("  S", "Shader", iced::Color::from_rgb8(0xB8, 0x6E, 0x3C)),
+            Self::ResourcePack => (
+                "  R",
+                "Resource Pack",
+                iced::Color::from_rgb8(0x5E, 0x7D, 0x61),
+            ),
+            Self::ModPack => ("  M", "Modpack", iced::Color::from_rgb8(0x6E, 0x5A, 0x8A)),
+            Self::DataPack => ("  D", "Datapack", iced::Color::from_rgb8(0xA4, 0x4E, 0x4E)),
+        };
+        super::tooltip(
+            widget::text(label).size(14).color(color).width(36),
+            hint,
+            widget::tooltip::Position::FollowCursor,
+        )
+        .into()
+    }
+}
 
 pub(crate) fn installed_page<'a>(sidebar: Column<'a>, body: Element<'a>) -> Element<'a> {
     row![
@@ -144,31 +172,30 @@ fn selection_hint(count: usize) -> Element<'static> {
 /// identity and metadata, without depending on the other manager's backend.
 pub(crate) struct ContentRow<'a> {
     pub indicator: Element<'a>,
-    pub icon: Element<'a>,
+    pub icon: Option<Element<'a>>,
     pub name: &'a str,
     pub version: &'a str,
-    pub name_width: f32,
+    /// Filename rows use their natural width; project rows reserve a name column.
+    pub name_width: Option<f32>,
     pub enabled: bool,
     pub selected: bool,
     pub select: Message,
 }
 impl<'a> ContentRow<'a> {
     pub fn button(self, available_width: f32) -> widget::Button<'a, Message, LauncherTheme> {
-        let occupied = self.version.len() as f32 * MONO_CHAR_WIDTH
-            + self.name_width
-            + PADDING.left
-            + PADDING.right
-            + 150.;
-        let filler = (available_width - occupied).max(0.);
         let name = widget::text(self.name)
             .shaping(widget::text::Shaping::Advanced)
-            .size(14);
+            .wrapping(widget::text::Wrapping::None);
+        let name = if self.name_width.is_some() {
+            name.size(14)
+        } else {
+            name.font(FONT_MONO).size(13)
+        };
         let name: Element = if self.enabled {
-            name.width(self.name_width)
-                .style(|t: &LauncherTheme| t.style_text(Color::Light))
+            name.style(|t: &LauncherTheme| t.style_text(Color::Light))
                 .into()
         } else {
-            row![widget::stack![
+            widget::stack![
                 name.style(|t: &LauncherTheme| t.style_text(Color::Mid)),
                 row![
                     widget::horizontal_rule(1)
@@ -176,29 +203,38 @@ impl<'a> ContentRow<'a> {
                 ]
                 .height(Length::Fill)
                 .align_y(Alignment::Center)
-            ]]
-            .width(self.name_width)
+            ]
             .into()
         };
-        select_box(
-            row![
-                self.indicator,
-                self.icon,
-                widget::Space::with_width(1),
-                name,
+        let name =
+            widget::column![name].push_maybe(self.name_width.map(|w| widget::Space::new(w, 0)));
+        let mut row = row![self.indicator];
+        if let Some(icon) = self.icon {
+            row = row.push(icon);
+            if self.name_width.is_some() {
+                row = row.push(widget::Space::with_width(1));
+            }
+        }
+        let row = row
+            .push(name)
+            .push_maybe((!self.version.is_empty()).then(|| {
                 widget::text(self.version)
-                    .style(move |t: &LauncherTheme| t.style_text(if self.enabled {
-                        Color::Mid
-                    } else {
-                        Color::SecondDark
-                    }))
+                    .style(move |t: &LauncherTheme| {
+                        t.style_text(if self.enabled {
+                            Color::Mid
+                        } else {
+                            Color::SecondDark
+                        })
+                    })
                     .font(FONT_MONO)
-                    .size(12),
-                widget::Space::with_width(filler)
-            ]
+                    .size(12)
+            }))
             .align_y(Alignment::Center)
             .padding(PADDING)
-            .spacing(SPACING),
+            .spacing(SPACING);
+        // Fill the viewport for selection, but let long rows scroll horizontally.
+        select_box(
+            widget::column![row, widget::Space::new(available_width, 0)],
             self.selected,
             self.select,
         )

@@ -31,6 +31,8 @@ Stop the game, then open **Mods** on the instance. Choose **Download Content…*
 | `.zip` (resource pack) | Leave it zipped. The launcher checks `pack.mcmeta` and copies the ZIP to `resourcepacks/`. Enable it in Horizon’s Resource Packs settings. |
 | `.zip` (Iris/OptiFine GLSL shader pack) | Leave it zipped. The launcher checks for `.fsh` or `.vsh` programs under `shaders/` and copies the ZIP to `shaderpacks/`. Select it in-game. |
 
+The installed list shows GLSL ZIPs by filename and native `.hshader` packs by manifest name. Packages without a bundled icon show just the name after the row indicator.
+
 Use **Resource Packs** to filter either the installed list or the Horizon registry. **Shaders** shows both shader formats. Click a project to read about it, the download icon to install it, or the bin icon to uninstall it. The launcher checks the Minecraft version, skips revoked releases and verifies the checksum and any author signature. Mods and `.hshader` packs must also match the build’s content API; resource packs and GLSL ZIPs don’t use that API.
 
 If a mod won’t load, check Horizon’s Mods screen and logs: the launcher doesn’t install dependencies for you. For a Java mod JAR, look for a Horizon port instead. The manager doesn’t install native mods or registry modpacks or datapacks. You can still add datapacks manually.

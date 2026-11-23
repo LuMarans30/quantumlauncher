@@ -391,6 +391,7 @@ impl Menu {
         let package = &entry.package;
         let kind = package.kind;
         let (name, version, hint) = match &package.metadata {
+            Ok(m) if kind == Kind::ShaderPack => (package.filename.as_str(), "", m.api.as_str()),
             Ok(m) if kind == Kind::ResourcePack => (
                 package.filename.as_str(),
                 m.api.as_str(),
@@ -414,32 +415,27 @@ impl Menu {
         } else if package.metadata.is_err() {
             icons::warn_s(16).width(36).into()
         } else {
-            widget::text(if kind == Kind::ResourcePack {
-                "  R"
+            if kind == Kind::ResourcePack {
+                content_row::ContentBadge::ResourcePack
             } else {
-                "  S"
-            })
-            .size(14)
-            .color(iced::Color::from_rgb8(0xB8, 0x6E, 0x3C))
-            .width(36)
-            .into()
+                content_row::ContentBadge::Shader
+            }
+            .view()
         };
         let key = (kind, package.filename.clone());
         let entry = crate::menu_renderer::content_row::ContentRow {
             indicator,
-            icon: entry
-                .icon
-                .as_ref()
-                .map_or_else(content_row::missing_icon, |icon| {
-                    widget::image(icon.clone())
-                        .width(content_row::ICON_SIZE)
-                        .height(content_row::ICON_SIZE)
-                        .content_fit(iced::ContentFit::ScaleDown)
-                        .into()
-                }),
+            icon: entry.icon.as_ref().map(|icon| {
+                widget::image(icon.clone())
+                    .width(content_row::ICON_SIZE)
+                    .height(content_row::ICON_SIZE)
+                    .content_fit(iced::ContentFit::ScaleDown)
+                    .into()
+            }),
             name,
             version,
-            name_width: 220.0,
+            name_width: (matches!(kind, Kind::Mod | Kind::Shader) && package.metadata.is_ok())
+                .then_some(220.0),
             enabled: !kind.is_mod() || package.enabled,
             selected: self.selected.contains(&key),
             select: ContentMessage::Select(key.0, key.1).into(),
