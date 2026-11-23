@@ -71,6 +71,7 @@ impl Launcher {
                 Err(e) => self.set_error(e),
             },
 
+            Message::HorizonContent(msg) => return self.update_horizon_content(msg),
             Message::ManageMods(msg) => {
                 let sort = msg.edits_mod_list();
                 let t = self.update_manage_mods(msg);

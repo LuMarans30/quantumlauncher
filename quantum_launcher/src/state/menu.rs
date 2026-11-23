@@ -1005,6 +1005,7 @@ pub enum State {
     UpdateFound(MenuLauncherUpdate),
 
     EditMods(MenuEditMods),
+    HorizonContent(crate::horizon_content::Menu),
     ExportModsText(MenuExportModsText),
     EditJarMods(MenuEditJarMods),
     ImportModpack(ProgressBar<GenericProgress>),

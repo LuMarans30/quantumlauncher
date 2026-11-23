@@ -104,6 +104,11 @@ impl Launcher {
             .into(),
             State::GenericMessage(msg) => column![widget::text(msg)].padding(10).into(),
             State::AccountLogin => view_account_login(),
+            State::HorizonContent(menu) => menu.view(
+                self.processes.contains_key(&menu.instance),
+                &self.images,
+                self.tick_timer,
+            ),
             State::EditMods(menu) => menu.view(
                 self.instance(),
                 self.tick_timer,

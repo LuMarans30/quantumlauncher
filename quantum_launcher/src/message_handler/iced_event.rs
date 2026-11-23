@@ -29,6 +29,9 @@ impl Launcher {
                 }
                 iced::window::Event::Resized(size) => {
                     self.window_state.size = (size.width, size.height);
+                    if let State::HorizonContent(menu) = &mut self.state {
+                        menu.fill_viewport(size.height);
+                    }
 
                     // Remember window height
                     let window = self.config.window.get_or_insert_default();
@@ -112,6 +115,13 @@ impl Launcher {
         modifiers: keyboard::Modifiers,
         status: iced::event::Status,
     ) -> Task<Message> {
+        if matches!(key, Key::Named(Named::Escape | Named::Enter))
+            && let State::HorizonContent(menu) = &self.state
+            && let Some(message) = menu.dismiss_error_message()
+        {
+            return self.update(message);
+        }
+
         let ignored = matches!(status, iced::event::Status::Ignored);
         if let (Key::Named(Named::Escape), true) = (key.clone(), ignored) {
             return self.key_escape_back(true).1;
@@ -304,6 +314,17 @@ impl Launcher {
         }
 
         match &self.state {
+            State::HorizonContent(menu) if !menu.busy => {
+                let message = menu.back_message();
+                return (
+                    true,
+                    if affect {
+                        self.update(message)
+                    } else {
+                        Task::none()
+                    },
+                );
+            }
             State::ChangeLog
             | State::EditMods(MenuEditMods {
                 updates: EditModsUpdates { progress: None, .. },
@@ -369,7 +390,8 @@ impl Launcher {
             }
             #[cfg(feature = "auto_update")]
             State::UpdateFound(_) => {}
-            State::InstallPaper(_)
+            State::HorizonContent(_)
+            | State::InstallPaper(_)
             | State::ExportInstance(_)
             | State::InstallForge(_)
             | State::InstallJava

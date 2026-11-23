@@ -45,6 +45,8 @@ use crate::{
 mod cli;
 /// Launcher configuration (global).
 mod config;
+/// Local Horizon mod and shader management.
+mod horizon_content;
 /// Definitions of certain icons (like Download,
 /// Play, Settings and so on) as `iced::widget`.
 mod icons;

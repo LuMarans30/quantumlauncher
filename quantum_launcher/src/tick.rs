@@ -174,7 +174,8 @@ impl Launcher {
             }
 
             // These menus don't require background ticking
-            State::Error { .. }
+            State::HorizonContent(_)
+            | State::Error { .. }
             | State::LoginAlternate(_)
             | State::AccountLogin
             | State::ExportInstance(_)

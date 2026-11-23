@@ -505,6 +505,7 @@ pub enum Message {
     Window(WindowMessage),
     Shortcut(ShortcutMessage),
     ManageMods(ManageModsMessage),
+    HorizonContent(crate::horizon_content::ContentMessage),
     ManageJarMods(ManageJarModsMessage),
     InstallMods(InstallModsMessage),
     InstallOptifine(InstallOptifineMessage),

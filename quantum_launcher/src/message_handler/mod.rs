@@ -106,6 +106,9 @@ impl Launcher {
     }
 
     pub fn go_to_edit_mods_menu(&mut self, msg: Option<InfoMessage>) -> Task<Message> {
+        if matches!(&self.state, State::HorizonContent(menu) if menu.busy) {
+            return Task::none();
+        }
         async fn inner(
             this: &mut Launcher,
             info_message: Option<InfoMessage>,
@@ -113,9 +116,13 @@ impl Launcher {
             let instance = this.selected_instance.as_ref().unwrap();
 
             let config = InstanceConfigJson::read(instance).await.strerr()?;
-            // Horizon has no Java version details or compatible mod manager.
+            // Horizon packages do not use Java version details or the Java mod index.
             if config.horizon.is_some() {
-                return Ok(Task::none());
+                this.state =
+                    State::HorizonContent(crate::horizon_content::Menu::new(instance.clone()));
+                return Ok(
+                    this.update_horizon_content(crate::horizon_content::ContentMessage::Refresh)
+                );
             }
             let details = Box::new(VersionDetails::load(instance).await.strerr()?);
             let mod_index = ModIndex::load(instance).await.strerr()?;

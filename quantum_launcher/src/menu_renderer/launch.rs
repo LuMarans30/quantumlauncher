@@ -167,7 +167,7 @@ impl Launcher {
         } else {
             self.get_client_play_button(selected)
         },]
-        .push_maybe((!menu.is_horizon).then(|| -> Element<'a> { Self::get_mods_button().into() }))
+        .push(Self::get_mods_button())
         .push(Self::get_files_button(selected))
         .spacing(5)
         .wrap();
@@ -245,7 +245,7 @@ impl Launcher {
         .into()
     }
 
-    fn get_mods_button() -> widget::Button<'static, Message, LauncherTheme> {
+    fn get_mods_button<'a>() -> widget::Button<'a, Message, LauncherTheme> {
         button_with_icon(icons::download(), "Mods", 15)
             .on_press(ManageModsMessage::Open.into())
             .width(98)

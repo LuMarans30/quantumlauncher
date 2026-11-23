@@ -1,13 +1,41 @@
 use super::*;
 
 #[tokio::test]
-async fn horizon_main_menu_guards_mods_and_captures_launch_stage() {
-    // The other launcher unit tests are pure state tests and do not access QL_DIR.
-    let root = std::env::temp_dir().join(format!("ql-horizon-ui-{}", std::process::id()));
-    std::fs::create_dir_all(&root).unwrap();
-    unsafe { std::env::set_var("QL_DIR", &root) };
+async fn horizon_main_menu_routes_content_and_captures_launch_stage() {
+    // LAUNCHER_DIR is cached process-wide. Set QL_DIR before the test binary
+    // starts rather than racing other tests (or an already initialized cache).
+    const SANDBOX: &str = "QL_HORIZON_UI_TEST_SANDBOX";
+    let Some(root) = std::env::var_os(SANDBOX) else {
+        let sandbox = tempfile::tempdir().unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "state::horizon_tests::horizon_main_menu_routes_content_and_captures_launch_stage",
+            ])
+            .env("QL_DIR", sandbox.path())
+            .env(SANDBOX, sandbox.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        // Also catch an exact filter that no longer matches any test.
+        assert!(
+            sandbox
+                .path()
+                .join("instances/horizon/config.json")
+                .is_file()
+        );
+        return;
+    };
     let instance = Instance::client("horizon");
-    std::fs::create_dir_all(instance.get_instance_path()).unwrap();
+    let instances = std::fs::canonicalize(root).unwrap().join("instances");
+    assert_eq!(
+        std::fs::canonicalize(&*LAUNCHER_DIR)
+            .unwrap()
+            .join("instances"),
+        instances
+    );
+    std::fs::create_dir_all(instances).unwrap();
+    std::fs::create_dir(instance.get_instance_path()).unwrap();
     let mut config = ql_core::InstanceConfigJson::new(
         InstanceKind::Client,
         false,
@@ -28,7 +56,8 @@ async fn horizon_main_menu_guards_mods_and_captures_launch_stage() {
     );
     // No details.json exists; a Java-shaped mod path would fail here.
     let _ = launcher.go_to_edit_mods_menu(None);
-    assert!(matches!(&launcher.state, State::Launch(menu) if menu.is_horizon));
+    assert!(matches!(&launcher.state, State::HorizonContent(menu) if menu.instance == instance));
+    let _ = launcher.go_to_main_menu(None);
 
     let _ = launcher.launch_game(None);
     assert_eq!(
@@ -53,8 +82,6 @@ async fn horizon_main_menu_guards_mods_and_captures_launch_stage() {
         launcher.java_recv.as_ref().unwrap().launch_stage,
         LaunchProgressStage::JavaInstallation
     );
-
-    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
