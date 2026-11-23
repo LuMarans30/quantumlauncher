@@ -1148,7 +1148,7 @@ async fn make_executable(dir: &Path) -> Result<(), HorizonError> {
 /// and a heartbeat. A lock whose owner is gone is **stolen by renaming it**
 /// (atomic, so only one waiter wins), and `Drop` only removes a lock it
 /// still owns.
-struct InstallLock {
+pub(crate) struct InstallLock {
     path: PathBuf,
     token: String,
     heartbeat: tokio::task::JoinHandle<()>,
@@ -1159,7 +1159,7 @@ impl InstallLock {
         &self.token
     }
 
-    async fn acquire(path: &Path) -> Result<Self, HorizonError> {
+    pub(crate) async fn acquire(path: &Path) -> Result<Self, HorizonError> {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await.path(parent)?;
         }

@@ -9,11 +9,19 @@ use sha2::{Digest, Sha256, Sha512};
 use crate::{HorizonError, api, build, content};
 
 pub const REGISTRY: &str = "https://horizon-rust.github.io/horizon-mods/index.json";
+const API: &str = "https://api.modrinth.com/v2";
 const MAX_FILE: u64 = 256 * 1024 * 1024;
 
 type Result<T> = std::result::Result<T, HorizonError>;
 pub(crate) fn error(e: impl std::fmt::Display) -> HorizonError {
     HorizonError::Message(e.to_string())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    Horizon,
+    Fabric,
+    Shaders,
 }
 
 #[derive(Debug, Clone)]
@@ -212,7 +220,9 @@ fn allowed_url(url: &reqwest::Url) -> bool {
         && matches!(
             url.host_str(),
             Some(
-                "horizon-rust.github.io"
+                "api.modrinth.com"
+                    | "cdn.modrinth.com"
+                    | "horizon-rust.github.io"
                     | "github.com"
                     | "release-assets.githubusercontent.com"
                     | "objects.githubusercontent.com"
@@ -344,6 +354,97 @@ fn icon_url(url: Option<String>, host: &str, path: &str) -> Option<String> {
         .then_some(url)
 }
 
+pub async fn search(source: Source, query: &str, game: &str, offset: usize) -> Result<Page> {
+    if source == Source::Horizon {
+        return Ok(browse_registry().await?.page(query, None, offset));
+    }
+    let mut facets = vec![vec![format!(
+        "project_type:{}",
+        if source == Source::Fabric {
+            "mod"
+        } else {
+            "shader"
+        }
+    )]];
+    if source == Source::Fabric {
+        facets.push(vec!["categories:fabric".to_owned()]);
+    }
+    if !game.trim().is_empty() {
+        facets.push(vec![format!("versions:{}", game.trim())]);
+    }
+    let mut url = reqwest::Url::parse(&format!("{API}/search")).map_err(error)?;
+    url.query_pairs_mut()
+        .append_pair("query", query.trim())
+        .append_pair(
+            "index",
+            if query.trim().is_empty() {
+                "downloads"
+            } else {
+                "relevance"
+            },
+        )
+        .append_pair("limit", &PAGE_SIZE.to_string())
+        .append_pair("offset", &offset.to_string())
+        .append_pair("facets", &serde_json::to_string(&facets).map_err(error)?);
+    #[derive(Deserialize)]
+    struct Search {
+        hits: Vec<Hit>,
+        total_hits: usize,
+    }
+    #[derive(Deserialize)]
+    struct Hit {
+        project_id: String,
+        title: String,
+        description: String,
+        downloads: u64,
+        icon_url: Option<String>,
+    }
+    let result: Search =
+        serde_json::from_slice(&get(url.as_str(), 4 * 1024 * 1024).await?).map_err(error)?;
+    let has_next =
+        !result.hits.is_empty() && offset.saturating_add(result.hits.len()) < result.total_hits;
+    let kind = if source == Source::Fabric {
+        ProjectKind::Mod
+    } else {
+        ProjectKind::Shader
+    };
+    let projects = result
+        .hits
+        .into_iter()
+        .filter(|h| {
+            !h.project_id.is_empty() && h.project_id.bytes().all(|c| c.is_ascii_alphanumeric())
+        })
+        .map(|h| Project {
+            id: h.project_id,
+            name: h.title,
+            summary: h.description,
+            description: None,
+            screenshots: Vec::new(),
+            kind,
+            downloads: h.downloads,
+            icon_url: icon_url(h.icon_url, "cdn.modrinth.com", "/data/"),
+            blocked: None,
+            shaderpack_ids: None,
+        })
+        .collect();
+    Ok(Page { projects, has_next })
+}
+
+/// Modrinth search hits carry a summary, not the project's Markdown body.
+pub async fn modrinth_description(id: &str) -> Result<String> {
+    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return Err(error("Invalid Modrinth project ID"));
+    }
+    #[derive(Deserialize)]
+    struct Details {
+        body: String,
+    }
+    let details: Details =
+        serde_json::from_slice(&get(&format!("{API}/project/{id}"), 4 * 1024 * 1024).await?)
+            .map_err(error)?;
+    Ok(details.body)
+}
+
 /// Resolve again at click time, not from stale search results.
 pub async fn registry_release(id: &str, config: &crate::HorizonConfig) -> Result<Release> {
     let index = index().await?;
@@ -444,6 +545,87 @@ fn select_registry(
             .get(field)
             .and_then(|c| c.get("schema"))
             .and_then(|s| s.as_u64()),
+    })
+}
+
+pub async fn modrinth_release(id: &str, source: Source, game: &str) -> Result<Release> {
+    if !id.bytes().all(|c| c.is_ascii_alphanumeric()) || id.is_empty() {
+        return Err(error("Invalid Modrinth project ID"));
+    }
+    if source == Source::Horizon {
+        return Err(error("Expected a Modrinth source"));
+    }
+    if source == Source::Fabric && game.trim().is_empty() {
+        return Err(error("Select a Java Minecraft version first"));
+    }
+    let mut url = reqwest::Url::parse(&format!("{API}/project/{id}/version")).map_err(error)?;
+    if source == Source::Fabric {
+        url.query_pairs_mut().append_pair("loaders", "[\"fabric\"]");
+    }
+    if !game.trim().is_empty() {
+        url.query_pairs_mut().append_pair(
+            "game_versions",
+            &serde_json::to_string(&[game.trim()]).map_err(error)?,
+        );
+    }
+    #[derive(Deserialize)]
+    struct Version {
+        id: String,
+        files: Vec<ModFile>,
+    }
+    #[derive(Deserialize)]
+    struct ModFile {
+        filename: String,
+        url: String,
+        size: u64,
+        primary: bool,
+        hashes: Hashes,
+    }
+    #[derive(Deserialize)]
+    struct Hashes {
+        sha512: String,
+    }
+    let versions: Vec<Version> =
+        serde_json::from_slice(&get(url.as_str(), 8 * 1024 * 1024).await?).map_err(error)?;
+    let version = versions
+        .first()
+        .ok_or_else(|| error("No release matching those Java filters"))?;
+    let extension = if source == Source::Fabric {
+        ".jar"
+    } else {
+        ".zip"
+    };
+    let file = version
+        .files
+        .iter()
+        .filter(|f| f.filename.ends_with(extension))
+        .find(|f| f.primary)
+        .or_else(|| {
+            version
+                .files
+                .iter()
+                .find(|f| f.filename.ends_with(extension))
+        })
+        .ok_or_else(|| error("Release has no supported file"))?;
+    if reqwest::Url::parse(&file.url).map_err(error)?.host_str() != Some("cdn.modrinth.com") {
+        return Err(error("Unexpected Modrinth download host"));
+    }
+    Ok(Release {
+        project: id.into(),
+        version: version.id.clone(),
+        file: FileSpec {
+            name: file.filename.clone(),
+            url: file.url.clone(),
+            size: file.size,
+            sha256: String::new(),
+            sha512: file.hashes.sha512.clone(),
+            signature: None,
+        },
+        key: None,
+        api: None,
+        side: None,
+        capabilities: Vec::new(),
+        schema: None,
     })
 }
 

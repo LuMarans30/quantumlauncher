@@ -29,6 +29,7 @@ mod instance;
 mod launch;
 mod mc;
 pub mod prepare;
+pub mod translate;
 pub mod update;
 
 pub use error::HorizonError;
