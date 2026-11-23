@@ -28,12 +28,14 @@ pub enum Kind {
     Shader,
     /// Iris/OptiFine-format ZIP, including Horizon-Translator's output.
     ShaderPack,
+    ResourcePack,
 }
 
 impl Kind {
     pub fn directory(self) -> &'static str {
         match self {
             Self::Mod => "horizon-mods",
+            Self::ResourcePack => "resourcepacks",
             Self::Shader | Self::ShaderPack => "shaderpacks",
         }
     }
@@ -42,7 +44,7 @@ impl Kind {
         match self {
             Self::Mod => "hmod",
             Self::Shader => "hshader",
-            Self::ShaderPack => "zip",
+            Self::ShaderPack | Self::ResourcePack => "zip",
         }
     }
 
@@ -54,7 +56,7 @@ impl Kind {
         match self {
             Self::Mod => "horizon-mod.toml",
             Self::Shader => "horizon-shaders.toml",
-            Self::ShaderPack => "", // No Horizon manifest in a GLSL pack.
+            Self::ShaderPack | Self::ResourcePack => "", // No Horizon TOML manifest.
         }
     }
 }
@@ -90,7 +92,7 @@ impl Package {
         let path = package_path(game, self.kind, &self.filename).ok()?;
         regular_file(&path).ok()?;
         let mut archive = zip::ZipArchive::new(File::open(path).ok()?).ok()?;
-        let name = if self.kind == Kind::ShaderPack {
+        let name = if matches!(self.kind, Kind::ShaderPack | Kind::ResourcePack) {
             "pack.png"
         } else {
             "icon.png"
@@ -132,17 +134,59 @@ pub(crate) fn valid_id(id: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
 }
 
-pub(crate) fn shaderpack_id(sha256: &str) -> String {
-    format!("shaderpack_{sha256}")
+fn shader_program(name: &str) -> bool {
+    name.starts_with("shaders/") && (name.ends_with(".fsh") || name.ends_with(".vsh"))
 }
 
-pub(crate) fn kind(path: &Path) -> Result<Kind> {
+fn resource_format(archive: &mut zip::ZipArchive<File>) -> Result<String> {
+    let entry = archive.by_name("pack.mcmeta").map_err(error)?;
+    let mut bytes = Vec::new();
+    entry
+        .take(MANIFEST_LIMIT + 1)
+        .read_to_end(&mut bytes)
+        .map_err(error)?;
+    if bytes.len() as u64 > MANIFEST_LIMIT {
+        return Err(error("pack.mcmeta is too large"));
+    }
+    let json: serde_json::Value = serde_json::from_slice(&bytes).map_err(error)?;
+    let pack = json["pack"]
+        .as_object()
+        .ok_or_else(|| error("pack.mcmeta needs a pack object"))?;
+    // Match the registry's facts: prefer legacy pack_format over min_format.
+    match pack.get("pack_format").or_else(|| pack.get("min_format")) {
+        None => Ok(String::new()),
+        Some(v) if v.is_u64() => Ok(v.to_string()),
+        Some(serde_json::Value::Array(parts)) if parts.iter().all(|n| n.is_u64()) => Ok(parts
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(".")),
+        _ => Err(error("Invalid resource pack format")),
+    }
+}
+
+fn kind(path: &Path) -> Result<Kind> {
     match path.extension().and_then(|s| s.to_str()) {
         Some("hmod") => Ok(Kind::Mod),
         Some("hshader") => Ok(Kind::Shader),
-        Some("zip") => Ok(Kind::ShaderPack),
+        Some("zip") => {
+            regular_file(path)?;
+            let archive = zip::ZipArchive::new(io(File::open(path), path)?).map_err(error)?;
+            for name in archive.file_names() {
+                if shader_program(&name.map_err(error)?) {
+                    return Ok(Kind::ShaderPack);
+                }
+            }
+            if archive.index_for_name("pack.mcmeta").is_some() {
+                Ok(Kind::ResourcePack)
+            } else {
+                Err(error(
+                    "Expected a resource pack with pack.mcmeta or a shaders-folder ZIP",
+                ))
+            }
+        }
         _ => Err(error(
-            "Expected .hmod, .hshader or a shaders-folder ZIP. For a Java mod, choose its Horizon port (.hmod) instead.",
+            "Expected .hmod, .hshader, a shader ZIP or a resource pack ZIP. For a Java mod, choose its Horizon port (.hmod) instead.",
         )),
     }
 }
@@ -175,12 +219,20 @@ pub(crate) fn inspect(path: &Path, kind: Kind) -> Result<Metadata> {
             return Err(error(format!("Unsafe or duplicate archive entry: {name}")));
         }
     }
-    if kind == Kind::ShaderPack {
-        if !seen.iter().any(|name| {
-            name.starts_with("shaders/") && (name.ends_with(".fsh") || name.ends_with(".vsh"))
-        }) {
+    if matches!(kind, Kind::ResourcePack | Kind::ShaderPack) {
+        if kind == Kind::ShaderPack && !seen.iter().any(|name| shader_program(name)) {
             return Err(error("ZIP has no shaders/*.fsh or shaders/*.vsh programs"));
         }
+        let (name, api) = if kind == Kind::ResourcePack {
+            if seen.iter().any(|n| n.starts_with("data/"))
+                && !seen.iter().any(|n| n.starts_with("assets/"))
+            {
+                return Err(error("This ZIP is a data pack, not a resource pack"));
+            }
+            ("Resource pack", resource_format(&mut archive)?)
+        } else {
+            ("GLSL shader pack", "Iris/OptiFine format".into())
+        };
         use sha2::{Digest, Sha256};
         let mut file = io(File::open(path), path)?;
         let mut hash = Sha256::new();
@@ -193,10 +245,10 @@ pub(crate) fn inspect(path: &Path, kind: Kind) -> Result<Metadata> {
             hash.update(&buffer[..count]);
         }
         return Ok(Metadata {
-            id: shaderpack_id(&format!("{:x}", hash.finalize())),
-            name: "GLSL shader pack".into(),
+            id: format!("{:x}", hash.finalize()),
+            name: name.into(),
             version: String::new(),
-            api: "Iris/OptiFine format".into(),
+            api,
             side: None,
             capabilities: Vec::new(),
             schema: None,
@@ -263,7 +315,12 @@ fn enabled(settings: &str, id: &str) -> bool {
 pub fn list(game_dir: &Path) -> Result<Vec<Package>> {
     let settings = read_settings(game_dir)?;
     let mut packages = Vec::new();
-    for kind in [Kind::Mod, Kind::Shader, Kind::ShaderPack] {
+    for kind in [
+        Kind::Mod,
+        Kind::Shader,
+        Kind::ShaderPack,
+        Kind::ResourcePack,
+    ] {
         let dir = content_dir(game_dir, kind)?;
         let entries = match fs::read_dir(&dir) {
             Ok(entries) => entries,

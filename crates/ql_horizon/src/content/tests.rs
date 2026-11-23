@@ -130,6 +130,40 @@ fn refuses_imports_that_cannot_be_managed_by_filename() {
 }
 
 #[test]
+fn local_resource_pack_lifecycle_and_zip_detection() {
+    let root = tempfile::tempdir().unwrap();
+    let game = root.path().join("game");
+    let path = root.path().join("custom.zip");
+    let meta = ("pack.mcmeta", r#"{"pack":{"min_format":[97,1]}}"#);
+    for entries in [
+        vec![meta, ("data/example/test", "")],
+        vec![("pack.mcmeta", "{}")],
+        vec![meta, ("../outside", "")],
+    ] {
+        archive(&path, &entries);
+        assert!(install(&game, &path).is_err());
+        assert!(list(&game).unwrap().is_empty());
+    }
+    archive(&path, &[meta, ("assets/example/textures/test.png", "")]);
+    install(&game, &path).unwrap();
+    assert!(game.join("resourcepacks/custom.zip").exists());
+    let renamed = root.path().join("copy.zip");
+    fs::copy(&path, &renamed).unwrap();
+    assert!(install(&game, &renamed).is_err());
+    let package = list(&game).unwrap().pop().unwrap();
+    assert_eq!(package.kind, Kind::ResourcePack);
+    assert_eq!(package.metadata.unwrap().api, "97.1");
+    assert!(set_enabled(&game, Kind::ResourcePack, "custom.zip", true).is_err());
+    // A shader ZIP may also have pack.mcmeta. Same filename, different destination.
+    archive(&path, &[meta, ("shaders/final.fsh", "void main() {}")]);
+    install(&game, &path).unwrap();
+    remove(&game, Kind::ResourcePack, "custom.zip").unwrap();
+    let remaining = list(&game).unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].kind, Kind::ShaderPack);
+}
+
+#[test]
 fn refuses_replacements_duplicate_ids_and_foreign_formats() {
     let root = tempfile::tempdir().unwrap();
     let game = root.path().join("game");

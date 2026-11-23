@@ -25,10 +25,11 @@ use crate::{
 };
 
 static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
-const CONTENT_TYPES: [(Option<ProjectKind>, &str); 3] = [
+const CONTENT_TYPES: [(Option<ProjectKind>, &str); 4] = [
     (None, "All"),
     (Some(ProjectKind::Mod), "Mods"),
     (Some(ProjectKind::Shader), "Shaders"),
+    (Some(ProjectKind::ResourcePack), "Resource Packs"),
 ];
 const CATALOG_SCROLL: &str = "HorizonContent:catalog";
 
@@ -367,6 +368,7 @@ impl Menu {
                 self.installed_kind.is_none_or(|kind| {
                     kind == match p.package.kind {
                         Kind::Mod => ProjectKind::Mod,
+                        Kind::ResourcePack => ProjectKind::ResourcePack,
                         Kind::Shader | Kind::ShaderPack => ProjectKind::Shader,
                     }
                 })
@@ -389,6 +391,11 @@ impl Menu {
         let package = &entry.package;
         let kind = package.kind;
         let (name, version, hint) = match &package.metadata {
+            Ok(m) if kind == Kind::ResourcePack => (
+                package.filename.as_str(),
+                m.api.as_str(),
+                "Select in Horizon's Resource Packs settings",
+            ),
             Ok(m) => (
                 m.name.as_str(),
                 m.version.as_str(),
@@ -407,11 +414,15 @@ impl Menu {
         } else if package.metadata.is_err() {
             icons::warn_s(16).width(36).into()
         } else {
-            widget::text("  S")
-                .size(14)
-                .color(iced::Color::from_rgb8(0xB8, 0x6E, 0x3C))
-                .width(36)
-                .into()
+            widget::text(if kind == Kind::ResourcePack {
+                "  R"
+            } else {
+                "  S"
+            })
+            .size(14)
+            .color(iced::Color::from_rgb8(0xB8, 0x6E, 0x3C))
+            .width(36)
+            .into()
         };
         let key = (kind, package.filename.clone());
         let entry = crate::menu_renderer::content_row::ContentRow {
@@ -1030,7 +1041,7 @@ mod tests {
             screenshots: Vec::new(),
             icon_url: None,
             blocked: None,
-            shaderpack_ids: None,
+            pack_hashes: None,
         }
     }
 

@@ -20,7 +20,7 @@
 
 There’s no launcher build of Horizon for Linux ARM64 or BSD.
 
-## Mods and shaders
+## Mods, shaders and resource packs
 
 Stop the game, then open **Mods** on the instance. Choose **Download Content…** to browse the Horizon registry, or **Add File…** if you already have the package. Both accept the same formats:
 
@@ -28,11 +28,12 @@ Stop the game, then open **Mods** on the instance. Choose **Download Content…*
 | --- | --- |
 | `.hmod` (content or WebAssembly mod) | New mods start disabled. Enable the mod in the launcher, then start Horizon. |
 | `.hshader` (Horizon shader) | Select the pack in Horizon’s shader settings. |
+| `.zip` (resource pack) | Leave it zipped. The launcher checks `pack.mcmeta` and copies the ZIP to `resourcepacks/`. Enable it in Horizon’s Resource Packs settings. |
 | `.zip` (Iris/OptiFine GLSL shader pack) | Leave it zipped. The launcher checks for `.fsh` or `.vsh` programs under `shaders/` and copies the ZIP to `shaderpacks/`. Select it in-game. |
 
-In the registry, **Shaders** shows both shader formats. Click a project to read about it, the download icon to install it, or the bin icon to uninstall it. The launcher checks the Minecraft version, skips revoked releases and verifies the checksum and any author signature. Mods and `.hshader` packs must also match the build’s content API; GLSL ZIPs don’t use that API.
+Use **Resource Packs** to filter either the installed list or the Horizon registry. **Shaders** shows both shader formats. Click a project to read about it, the download icon to install it, or the bin icon to uninstall it. The launcher checks the Minecraft version, skips revoked releases and verifies the checksum and any author signature. Mods and `.hshader` packs must also match the build’s content API; resource packs and GLSL ZIPs don’t use that API.
 
-If a mod won’t load, check Horizon’s Mods screen and logs: the launcher doesn’t install dependencies for you. For a Java mod JAR, look for a Horizon port instead. The manager doesn’t install native mods or registry modpacks, resource packs or datapacks. You can still add resource packs and datapacks manually.
+If a mod won’t load, check Horizon’s Mods screen and logs: the launcher doesn’t install dependencies for you. For a Java mod JAR, look for a Horizon port instead. The manager doesn’t install native mods or registry modpacks or datapacks. You can still add datapacks manually.
 
 ## Updating
 
@@ -50,7 +51,7 @@ Paths below are relative to the launcher’s data folder (`~/.local/share/Quantu
 
 | Path | What’s there |
 | --- | --- |
-| `instances/<name>/.minecraft/` | Saves, options, `horizon-mods/` and `shaderpacks/` |
+| `instances/<name>/.minecraft/` | Saves, options, `horizon-mods/`, `resourcepacks/` and `shaderpacks/` |
 | `instances/<name>/horizon/` | Horizon logs, crash reports and registry key receipts |
 | `instances/<name>/config.json` | Instance settings, including the selected Horizon build |
 | `horizon/builds/<build-id>/` | Downloaded binaries. The ID includes part of the archive checksum because the `nightly` tag is reused. |

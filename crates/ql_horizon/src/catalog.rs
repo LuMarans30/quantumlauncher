@@ -35,16 +35,17 @@ pub struct Project {
     pub downloads: u64,
     pub icon_url: Option<String>,
     pub blocked: Option<String>,
-    /// Installed GLSL ZIPs have content-derived IDs instead of a manifest project ID.
-    pub shaderpack_ids: Option<Vec<String>>,
+    /// Standalone ZIP packs have content-derived IDs instead of a manifest project ID.
+    pub pack_hashes: Option<Vec<String>>,
 }
 
 impl Project {
     pub fn matches_package(&self, package: &content::Package) -> bool {
         use content::Kind;
         package.metadata.as_ref().is_ok_and(|m| {
-            match (self.kind, package.kind, &self.shaderpack_ids) {
-                (ProjectKind::Shader, Kind::ShaderPack, Some(ids)) => ids.contains(&m.id),
+            match (self.kind, package.kind, &self.pack_hashes) {
+                (ProjectKind::ResourcePack, Kind::ResourcePack, Some(ids))
+                | (ProjectKind::Shader, Kind::ShaderPack, Some(ids)) => ids.contains(&m.id),
                 (ProjectKind::Shader, Kind::Shader, None) | (ProjectKind::Mod, Kind::Mod, None) => {
                     self.id == m.id
                 }
@@ -58,6 +59,7 @@ impl Project {
 pub enum ProjectKind {
     Mod,
     Shader,
+    ResourcePack,
 }
 
 impl ProjectKind {
@@ -65,6 +67,7 @@ impl ProjectKind {
         match self {
             Self::Mod => "Mod",
             Self::Shader => "Shader",
+            Self::ResourcePack => "Resource Pack",
         }
     }
 }
@@ -127,6 +130,7 @@ pub struct FileSpec {
 
 #[derive(Debug, Clone)]
 pub struct Release {
+    registry_kind: Option<content::Kind>,
     pub project: String,
     pub version: String,
     pub file: FileSpec,
@@ -308,6 +312,7 @@ fn registry_for_browsing(index: Index) -> Registry {
             let kind = match p.kind.as_str() {
                 "mod" => ProjectKind::Mod,
                 "shader" | "shaderpack" => ProjectKind::Shader,
+                "resourcepack" => ProjectKind::ResourcePack,
                 _ => return None,
             };
             Some(Project {
@@ -334,12 +339,8 @@ fn registry_for_browsing(index: Index) -> Registry {
                     "/horizon-mods/icons/",
                 ),
                 blocked: None,
-                shaderpack_ids: (p.kind == "shaderpack").then(|| {
-                    p.versions
-                        .iter()
-                        .map(|v| content::shaderpack_id(&v.file.sha256))
-                        .collect()
-                }),
+                pack_hashes: matches!(p.kind.as_str(), "shaderpack" | "resourcepack")
+                    .then(|| p.versions.iter().map(|v| v.file.sha256.clone()).collect()),
             })
         })
         .collect();
@@ -424,7 +425,7 @@ pub async fn search(source: Source, query: &str, game: &str, offset: usize) -> R
             downloads: h.downloads,
             icon_url: icon_url(h.icon_url, "cdn.modrinth.com", "/data/"),
             blocked: None,
-            shaderpack_ids: None,
+            pack_hashes: None,
         })
         .collect();
     Ok(Page { projects, has_next })
@@ -493,6 +494,7 @@ fn select_registry(
         "mod" => content::Kind::Mod,
         "shader" => content::Kind::Shader,
         "shaderpack" => content::Kind::ShaderPack,
+        "resourcepack" => content::Kind::ResourcePack,
         _ => return Err(error("This registry content kind is not supported yet")),
     };
     let version = project
@@ -504,6 +506,11 @@ fn select_registry(
                 && (if kind == content::Kind::ShaderPack {
                     // GLSL ZIPs have no Horizon manifest or versioned shader API.
                     v.api.is_empty()
+                } else if kind == content::Kind::ResourcePack {
+                    // Resource packs target a Minecraft release, not a Horizon mod API.
+                    content
+                        .pointer("/resourcepack/format")
+                        .is_some_and(|f| f.is_array())
                 } else {
                     advertises_api(Some(content), field, &v.api)
                 })
@@ -528,12 +535,16 @@ fn select_registry(
     if version.file.size > 64 * 1024 * 1024 || version.file.sha256.len() != 64 {
         return Err(error("Registry file exceeds 64 MiB or has no SHA-256"));
     }
-    if content::kind(Path::new(&version.file.name)).ok() != Some(kind)
+    if Path::new(&version.file.name)
+        .extension()
+        .and_then(|e| e.to_str())
+        != Some(kind.extension())
         || project.key.is_some() != version.file.signature.is_some()
     {
         return Err(error("Unsupported package format or missing signature/key"));
     }
     Ok(Release {
+        registry_kind: Some(kind),
         project: id.into(),
         version: version.version.clone(),
         file: version.file.clone(),
@@ -611,6 +622,7 @@ pub async fn modrinth_release(id: &str, source: Source, game: &str) -> Result<Re
         return Err(error("Unexpected Modrinth download host"));
     }
     Ok(Release {
+        registry_kind: None,
         project: id.into(),
         version: version.id.clone(),
         file: FileSpec {
@@ -730,7 +742,9 @@ pub async fn install_registry(
     let release = registry_release(id, config).await?;
     let temp = tempfile::tempdir().map_err(error)?;
     let path = download(&release, temp.path()).await?;
-    let kind = content::kind(&path)?;
+    let kind = release
+        .registry_kind
+        .ok_or_else(|| error("Expected a registry release"))?;
     validate_registry_package(&release, &path, kind)?;
     remember_key(instance, &release)?;
     content::install_as(&instance.get_dot_minecraft_path(), &path, kind)
@@ -738,11 +752,17 @@ pub async fn install_registry(
 
 fn validate_registry_package(release: &Release, path: &Path, kind: content::Kind) -> Result<()> {
     let metadata = content::inspect(path, kind)?;
-    if kind == content::Kind::ShaderPack {
-        return if metadata.id == content::shaderpack_id(&release.file.sha256) {
+    if matches!(
+        kind,
+        content::Kind::ShaderPack | content::Kind::ResourcePack
+    ) {
+        return if metadata.id == release.file.sha256
+            && (kind != content::Kind::ResourcePack
+                || release.api.as_deref() == Some(&metadata.api))
+        {
             Ok(())
         } else {
-            Err(error("Shader ZIP does not match registry digest"))
+            Err(error("Pack ZIP does not match registry metadata"))
         };
     }
     let api_matches = release.api.as_deref() == Some(&metadata.api);
@@ -925,11 +945,47 @@ mod tests {
         for filter in [None, Some(ProjectKind::Shader)] {
             let page = registry.page("", filter, 0);
             assert!(page.projects[0].blocked.is_none());
-            assert_eq!(
-                page.projects[0].shaderpack_ids,
-                Some(vec![content::shaderpack_id(&digest)])
-            );
+            assert_eq!(page.projects[0].pack_hashes, Some(vec![digest.clone()]));
         }
+    }
+
+    #[test]
+    fn resource_pack_registry_uses_declared_kind_format_and_digest() {
+        use std::io::Write;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("renamed.zip");
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        zip.start_file("pack.mcmeta", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(br#"{"pack":{"pack_format":97,"min_format":[97,1]}}"#)
+            .unwrap();
+        zip.finish().unwrap();
+        let mut index = fixture();
+        let p = &mut index.projects[0];
+        p.kind = "resourcepack".into();
+        let v = &mut p.versions[0];
+        v.file.name = "example.zip".into();
+        v.file.url = v.file.url.replace(".hmod", ".zip");
+        v.file.sha256 = format!("{:x}", Sha256::digest(std::fs::read(&path).unwrap()));
+        v.api = "97".into();
+        let api = serde_json::json!({"resourcepack":{"format":[97,1]}});
+        let mut release = select_registry(&index, "example", "26.3", &api).unwrap();
+        assert!(select_registry(&index, "example", "1.21", &api).is_err());
+        assert_eq!(release.registry_kind, Some(content::Kind::ResourcePack));
+        validate_registry_package(&release, &path, content::Kind::ResourcePack).unwrap();
+        release.api = Some("84".into());
+        assert!(validate_registry_package(&release, &path, content::Kind::ResourcePack).is_err());
+        let registry = registry_for_browsing(index);
+        assert!(
+            registry
+                .page("", Some(ProjectKind::Shader), 0)
+                .projects
+                .is_empty()
+        );
+        let page = registry.page("", Some(ProjectKind::ResourcePack), 0);
+        let game = root.path().join("game");
+        content::install(&game, &path).unwrap();
+        assert!(page.projects[0].matches_package(&content::list(&game).unwrap()[0]));
     }
 
     #[test]
@@ -972,6 +1028,7 @@ mod tests {
             ("additional_lights", content::Kind::Mod),
             ("daybreak", content::Kind::Shader),
             ("fluxxy_shader", content::Kind::ShaderPack),
+            ("abelha_skull", content::Kind::ResourcePack),
         ] {
             install_registry(id, &instance, &config)
                 .await
