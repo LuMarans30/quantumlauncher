@@ -54,18 +54,13 @@ impl Launcher {
                 }
             }
             InstallModsMessage::Scrolled(viewport) => {
-                let total_height =
-                    viewport.content_bounds().height - (viewport.bounds().height * 2.0);
-                let absolute_offset = viewport.absolute_offset();
-                let scroll_px = absolute_offset.y;
-
                 if let State::ModsDownload(menu) = &mut self.state {
                     if menu.results.is_none() {
                         menu.has_continuation_ended = false;
                     }
 
-                    menu.scroll_offset = absolute_offset;
-                    if (scroll_px > total_height)
+                    menu.scroll_offset = viewport.absolute_offset();
+                    if crate::menu_renderer::content_store::needs_continuation(viewport)
                         && !menu.is_loading_continuation
                         && !menu.has_continuation_ended
                     {
@@ -149,15 +144,16 @@ impl Launcher {
             }
             InstallModsMessage::LoadedExtendedInfo(Ok((id, info))) => {
                 if let State::ModsDownload(menu) = &mut self.state
-                    && let Some(res) = &mut menu.results {
-                        for m in &mut res.mods {
-                            // Fill in that mod's entry with extended info
-                            if m.get_id() == id {
-                                *m = info;
-                                break;
-                            }
+                    && let Some(res) = &mut menu.results
+                {
+                    for m in &mut res.mods {
+                        // Fill in that mod's entry with extended info
+                        if m.get_id() == id {
+                            *m = info;
+                            break;
                         }
                     }
+                }
             }
             InstallModsMessage::Download(index) => {
                 return self.mod_download(index);

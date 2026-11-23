@@ -3,7 +3,7 @@ use iced::{
     Alignment, Length,
     widget::{self, column, row, text::Wrapping},
 };
-use ql_mod_manager::store::{SearchMod, StoreBackendType};
+use ql_mod_manager::store::{GalleryItem, SearchMod, StoreBackendType, UrlKind};
 
 use crate::{
     icons,
@@ -41,139 +41,185 @@ pub fn view_project_description<'a, T: iced::advanced::text::IntoFragment<'a>>(
     images: &'a ImageState,
     tick_timer: usize,
 ) -> Element<'a> {
-    // Parses the Markdown description of the mod.
-    let markdown_description: Element = match description {
-        Ok(Some(desc)) => MarkWidget::new(desc)
-            .on_clicking_link(Message::CoreOpenLink)
-            .on_drawing_image(|img| images.view(Some(img.url), img.width, img.height))
-            .on_updating_state(|n| InstallModsMessage::TickDesc(n).into())
-            .font(FONT_DEFAULT)
-            .font_mono(FONT_MONO)
-            .into(),
-        Ok(None) => {
-            let dots = ".".repeat((tick_timer % 3) + 1);
-            widget::text!("Loading{dots}").into()
-        }
-        Err(err) => widget::container(
-            column![
-                widget::text("Failed to load description").size(16),
-                widget::text(err).size(13)
-            ]
-            .spacing(5)
-            .padding(10),
-        )
-        .into(),
+    let project = ProjectDescription {
+        title: &hit.title,
+        id: &hit.id,
+        summary: &hit.description,
+        icon: hit.icon_url.as_deref(),
+        gallery: &hit.gallery,
+        urls: &hit.urls,
+        page_url: format!(
+            "{}{}/{}",
+            match backend {
+                StoreBackendType::Modrinth => "https://modrinth.com/",
+                StoreBackendType::Curseforge => "https://www.curseforge.com/minecraft/",
+            },
+            hit.project_type,
+            hit.internal_name
+        ),
     };
+    project.view(description, back_msg.into(), images, tick_timer, |n| {
+        InstallModsMessage::TickDesc(n).into()
+    })
+}
 
-    let url = format!(
-        "{}{}/{}",
-        match backend {
-            StoreBackendType::Modrinth => "https://modrinth.com/",
-            StoreBackendType::Curseforge => "https://www.curseforge.com/minecraft/",
-        },
-        hit.project_type,
-        hit.internal_name
-    );
+pub(crate) struct ProjectDescription<'a> {
+    pub title: &'a str,
+    pub id: &'a str,
+    pub summary: &'a str,
+    pub icon: Option<&'a str>,
+    pub gallery: &'a [GalleryItem],
+    pub urls: &'a [(UrlKind, String)],
+    pub page_url: String,
+}
 
-    let top_bar = widget::container(
-        row![
-            button_with_icon(icons::back_s(12), "Back", 13)
-                .padding([5, 8])
-                .on_press(back_msg.into()),
-            widget::Space::with_width(0),
-            images.view(hit.icon_url.as_deref(), Some(20.0), Some(20.0)),
-            widget::text(&*hit.title)
-                .shaping(widget::text::Shaping::Advanced)
-                .width(Length::Fill)
-                .size(16),
-            widget::tooltip(
-                button_with_icon(icons::globe_s(12), "Open Mod Page", 13)
-                    .padding([5, 8])
-                    .on_press(Message::CoreOpenLink(url.clone())),
-                widget::text(url),
-                widget::tooltip::Position::Bottom
+impl<'a> ProjectDescription<'a> {
+    pub fn view<T: iced::advanced::text::IntoFragment<'a>>(
+        self,
+        description: Result<&'a Option<MarkState>, T>,
+        back: Message,
+        images: &'a ImageState,
+        tick_timer: usize,
+        update: impl Fn(frostmark::UpdateMsg) -> Message + 'static,
+    ) -> Element<'a> {
+        let Self {
+            title,
+            id,
+            summary,
+            icon,
+            gallery,
+            urls,
+            page_url: url,
+        } = self;
+        let markdown_description: Element = match description {
+            Ok(Some(desc)) => MarkWidget::new(desc)
+                .on_clicking_link(|url| {
+                    if url.starts_with("https://") || url.starts_with("http://") {
+                        Message::CoreOpenLink(url)
+                    } else {
+                        Message::Nothing
+                    }
+                })
+                .on_drawing_image(|img| images.view(Some(img.url), img.width, img.height))
+                .on_updating_state(update)
+                .font(FONT_DEFAULT)
+                .font_mono(FONT_MONO)
+                .into(),
+            Ok(None) => {
+                let dots = ".".repeat((tick_timer % 3) + 1);
+                widget::text!("Loading{dots}").into()
+            }
+            Err(err) => widget::container(
+                column![
+                    widget::text("Failed to load description").size(16),
+                    widget::text(err).size(13)
+                ]
+                .spacing(5)
+                .padding(10),
             )
-            .style(|n| n.style_container_sharp_box(0.0, Color::ExtraDark)),
-            widget::button(widget::text("Copy ID").size(13).wrapping(Wrapping::None))
-                .padding([5, 8])
-                .on_press_with(|| Message::CoreCopyText(hit.id.to_string())),
-        ]
-        .align_y(Alignment::Center)
-        .spacing(10),
-    )
-    .style(|n: &LauncherTheme| n.style_container_sharp_box(0.0, Color::ExtraDark))
-    .padding([5, 10]);
+            .into(),
+        };
 
-    let scroll = |e, p| {
-        widget::scrollable(e)
-            .width(Length::FillPortion(p))
-            .height(Length::Fill)
-    };
-
-    let side_description = scroll(column![markdown_description].padding(20), 2)
-        .style(LauncherTheme::style_scrollable_flat_dark);
-
-    let side_extra_info = scroll(
-        column![
-            widget::text(&hit.description)
-                .size(14)
-                .shaping(widget::text::Shaping::Advanced),
-            widget::horizontal_rule(1).style(barthin),
-            // Note: When upgrading to iced 0.14, make sure to update link click handling
-            widget::column(hit.urls.iter().map(|(kind, url)| {
-                tooltip(
-                    widget::button(underline(
-                        widget::text!("{kind} →").size(13),
-                        Color::SecondLight,
-                    ))
-                    .padding(0)
-                    .style(|n: &LauncherTheme, status| {
-                        n.style_button(status, StyleButton::FlatExtraDark)
-                    })
-                    .on_press_with(|| Message::CoreOpenLink(url.clone())),
-                    widget::text(url).size(12),
-                    widget::tooltip::Position::Left,
+        let top_bar = widget::container(
+            row![
+                button_with_icon(icons::back_s(12), "Back", 13)
+                    .padding([5, 8])
+                    .on_press(back),
+                widget::Space::with_width(0),
+                images.view(icon, Some(20.0), Some(20.0)),
+                widget::text(title)
+                    .shaping(widget::text::Shaping::Advanced)
+                    .width(Length::Fill)
+                    .size(16),
+                widget::tooltip(
+                    button_with_icon(icons::globe_s(12), "Open Mod Page", 13)
+                        .padding([5, 8])
+                        .on_press(Message::CoreOpenLink(url.clone())),
+                    widget::text(url),
+                    widget::tooltip::Position::Bottom
                 )
-                .into()
-            }))
-            .spacing(5),
-        ]
-        .push_maybe((!hit.gallery.is_empty()).then(|| {
+                .style(|n| n.style_container_sharp_box(0.0, Color::ExtraDark)),
+                widget::button(widget::text("Copy ID").size(13).wrapping(Wrapping::None))
+                    .padding([5, 8])
+                    .on_press_with(move || Message::CoreCopyText(id.to_owned())),
+            ]
+            .align_y(Alignment::Center)
+            .spacing(10),
+        )
+        .style(|n: &LauncherTheme| n.style_container_sharp_box(0.0, Color::ExtraDark))
+        .padding([5, 10]);
+
+        let scroll = |e, p| {
+            widget::scrollable(e)
+                .width(Length::FillPortion(p))
+                .height(Length::Fill)
+        };
+
+        let side_description = scroll(column![markdown_description].padding(20), 2)
+            .style(LauncherTheme::style_scrollable_flat_dark);
+
+        let side_extra_info = scroll(
             column![
+                widget::text(summary)
+                    .size(14)
+                    .shaping(widget::text::Shaping::Advanced),
                 widget::horizontal_rule(1).style(barthin),
-                widget::text("Gallery").size(20),
-                widget::text("Hover to enlarge").size(12).style(tsubtitle),
-                widget::column(hit.gallery.iter().map(|n| {
-                    let img = || images.view(Some(&n.url), None, None);
-                    column![widget::tooltip(
-                        img(),
-                        img(),
-                        widget::tooltip::Position::Left
-                    )]
-                    .push_maybe(n.title.as_deref().map(|n| widget::text(n).size(14)))
-                    .push_maybe(
-                        n.description
-                            .as_deref()
-                            .map(|n| widget::text(n).size(12).style(tsubtitle)),
+                // Note: When upgrading to iced 0.14, make sure to update link click handling
+                widget::column(urls.iter().map(|(kind, url)| {
+                    tooltip(
+                        widget::button(underline(
+                            widget::text!("{kind} →").size(13),
+                            Color::SecondLight,
+                        ))
+                        .padding(0)
+                        .style(|n: &LauncherTheme, status| {
+                            n.style_button(status, StyleButton::FlatExtraDark)
+                        })
+                        .on_press_with(|| Message::CoreOpenLink(url.clone())),
+                        widget::text(url).size(12),
+                        widget::tooltip::Position::Left,
                     )
-                    .spacing(5)
                     .into()
                 }))
-                .spacing(20),
+                .spacing(5),
             ]
+            .push_maybe((!gallery.is_empty()).then(|| {
+                column![
+                    widget::horizontal_rule(1).style(barthin),
+                    widget::text("Gallery").size(20),
+                    widget::text("Hover to enlarge").size(12).style(tsubtitle),
+                    widget::column(gallery.iter().map(|n| {
+                        let img = || images.view(Some(&n.url), None, None);
+                        column![widget::tooltip(
+                            img(),
+                            img(),
+                            widget::tooltip::Position::Left
+                        )]
+                        .push_maybe(n.title.as_deref().map(|n| widget::text(n).size(14)))
+                        .push_maybe(
+                            n.description
+                                .as_deref()
+                                .map(|n| widget::text(n).size(12).style(tsubtitle)),
+                        )
+                        .spacing(5)
+                        .into()
+                    }))
+                    .spacing(20),
+                ]
+                .spacing(10)
+            }))
             .spacing(10)
-        }))
-        .spacing(10)
-        .padding(20)
-        .width(Length::FillPortion(1)),
-        1,
-    )
-    .style(LauncherTheme::style_scrollable_flat_extra_dark);
+            .padding(20)
+            .width(Length::FillPortion(1)),
+            1,
+        )
+        .style(LauncherTheme::style_scrollable_flat_extra_dark);
 
-    column![
-        top_bar,
-        widget::horizontal_rule(1).style(barthin),
-        row![side_description, side_extra_info]
-    ]
-    .into()
+        column![
+            top_bar,
+            widget::horizontal_rule(1).style(barthin),
+            row![side_description, side_extra_info]
+        ]
+        .into()
+    }
 }

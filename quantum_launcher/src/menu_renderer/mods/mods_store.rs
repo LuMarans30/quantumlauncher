@@ -10,82 +10,61 @@ use ql_mod_manager::store::{Category, ModId, QueryType, SearchMod, StoreBackendT
 use crate::{
     icons,
     menu_renderer::{
-        Column, Element, barthin, button_with_icon, mods::description::view_project_description,
-        tooltip, tsubtitle,
+        Column, Element, barthin, content_store, mods::description::view_project_description,
+        tsubtitle,
     },
     state::{
         ImageState, InstallModsMessage, ManageModsMessage, MenuModsDownload, Message,
         ModCategoryState, ModOperation,
     },
-    stylesheet::{color::Color, styles::LauncherTheme, widgets::StyleButton},
+    stylesheet::{color::Color, styles::LauncherTheme},
 };
-
-const MOD_HEIGHT: u16 = 55;
 
 impl MenuModsDownload {
     /// Renders the main store page, with the search bar,
     /// back button and list of searched mods.
     fn view_main<'a>(&'a self, images: &'a ImageState, tick_timer: usize) -> Element<'a> {
-        column![
+        content_store::page(
             self.get_top_bar(),
-            row![
-                self.get_side_panel(tick_timer),
-                self.mods_display(images, tick_timer)
-            ]
-        ]
-        .into()
+            self.get_side_panel(tick_timer),
+            self.mods_display(images, tick_timer),
+        )
     }
 
-    fn get_top_bar(&self) -> widget::Container<'_, Message, LauncherTheme> {
-        widget::container(
-            row![
-                button_with_icon(icons::back_s(12), "Back", 13)
-                    .padding([5, 8])
-                    .on_press(ManageModsMessage::Open.into()),
-                widget::text_input("Search...", &self.query)
-                    .size(14)
-                    .on_input(|n| InstallModsMessage::SearchInput(n).into()),
-                widget::text("Store:").size(14).style(tsubtitle),
-                column![
-                    widget::radio(
-                        "Modrinth",
-                        StoreBackendType::Modrinth,
-                        Some(self.backend),
-                        |v| InstallModsMessage::ChangeBackend(v).into()
-                    )
-                    .text_size(10)
-                    .size(10),
-                    widget::radio(
-                        "CurseForge",
-                        StoreBackendType::Curseforge,
-                        Some(self.backend),
-                        |v| InstallModsMessage::ChangeBackend(v).into()
-                    )
-                    .text_size(10)
-                    .size(10),
-                ],
-            ]
-            .align_y(Alignment::Center)
-            .spacing(10),
+    fn get_top_bar(&self) -> Element<'_> {
+        content_store::top_bar(
+            Some(ManageModsMessage::Open.into()),
+            &self.query,
+            Some(|n| InstallModsMessage::SearchInput(n).into()),
+            column![
+                widget::radio(
+                    "Modrinth",
+                    StoreBackendType::Modrinth,
+                    Some(self.backend),
+                    |v| InstallModsMessage::ChangeBackend(v).into()
+                )
+                .text_size(10)
+                .size(10),
+                widget::radio(
+                    "CurseForge",
+                    StoreBackendType::Curseforge,
+                    Some(self.backend),
+                    |v| InstallModsMessage::ChangeBackend(v).into()
+                )
+                .text_size(10)
+                .size(10),
+            ],
         )
-        .style(|n: &LauncherTheme| n.style_container_sharp_box(0.0, Color::ExtraDark))
-        .padding([5, 10])
     }
 
     fn mods_display<'a>(&'a self, images: &'a ImageState, tick_timer: usize) -> Column<'a> {
         let mods_list = self.get_mods_list(images, tick_timer);
 
-        self.mods_view_warnings().push(
-            widget::scrollable(mods_list.spacing(5))
-                .style(|theme: &LauncherTheme, status| theme.style_scrollable_flat_dark(status))
-                .id(widget::scrollable::Id::new(
-                    "MenuModsDownload:main:mods_list",
-                ))
-                .height(Length::Fill)
-                .width(Length::Fill)
-                .spacing(0)
-                .on_scroll(|viewport| InstallModsMessage::Scrolled(viewport).into()),
-        )
+        self.mods_view_warnings().push(content_store::results_list(
+            mods_list,
+            "MenuModsDownload:main:mods_list",
+            |viewport| InstallModsMessage::Scrolled(viewport).into(),
+        ))
     }
 
     fn mods_view_warnings(&self) -> widget::Column<'static, Message, LauncherTheme> {
@@ -164,30 +143,21 @@ impl MenuModsDownload {
             .style(LauncherTheme::style_scrollable_flat_extra_dark);
         }
 
-        widget::scrollable(
-            column![
-                row![icons::download_s(14), widget::text("Type:").size(18)]
-                    .align_y(Alignment::Center)
-                    .spacing(5),
-                widget::column(QueryType::ALL.iter().map(|n| {
-                    widget::radio(n.to_string(), *n, Some(self.query_type), |v| {
-                        InstallModsMessage::ChangeQueryType(v).into()
-                    })
-                    .spacing(5)
-                    .text_size(14)
-                    .size(12)
-                    .into()
-                })),
-                widget::Space::with_height(5),
-                self.categories
-                    .view(self.backend, self.force_open_source, tick_timer),
-            ]
-            .spacing(5)
-            .padding(10),
-        )
-        .width(180)
-        .height(Length::Fill)
-        .style(LauncherTheme::style_scrollable_flat_extra_dark)
+        content_store::sidebar(column![
+            content_store::type_heading(),
+            widget::column(QueryType::ALL.iter().map(|n| {
+                widget::radio(n.to_string(), *n, Some(self.query_type), |v| {
+                    InstallModsMessage::ChangeQueryType(v).into()
+                })
+                .spacing(5)
+                .text_size(14)
+                .size(12)
+                .into()
+            })),
+            widget::Space::with_height(5),
+            self.categories
+                .view(self.backend, self.force_open_source, tick_timer),
+        ])
     }
 
     fn get_mods_list<'a>(&'a self, images: &'a ImageState, tick_timer: usize) -> Column<'a> {
@@ -231,34 +201,13 @@ impl MenuModsDownload {
 
         let action_button: Element = action_button(i, hit, is_installed, is_downloading);
 
-        row!(
+        content_store::result_row(
             action_button,
-            widget::button(
-                row![
-                    images.view(hit.icon_url.as_deref(), Some(32.0), Some(32.0)),
-                    column![
-                        widget::text(&*hit.title)
-                            .wrapping(widget::text::Wrapping::None)
-                            .shaping(widget::text::Shaping::Advanced)
-                            .height(19),
-                        widget::text(&hit.description)
-                            .wrapping(widget::text::Wrapping::None)
-                            .shaping(widget::text::Shaping::Advanced)
-                            .size(12)
-                            .style(tsubtitle),
-                    ]
-                    .spacing(2),
-                ]
-                .padding(8)
-                .spacing(16),
-            )
-            .height(MOD_HEIGHT)
-            .width(Length::Fill)
-            .padding(0)
-            .on_press(InstallModsMessage::Click(i).into())
+            images.view(hit.icon_url.as_deref(), Some(32.0), Some(32.0)),
+            &hit.title,
+            &hit.description,
+            InstallModsMessage::Click(i).into(),
         )
-        .spacing(5)
-        .into()
     }
 
     pub fn view<'a>(&'a self, images: &'a ImageState, tick_timer: usize) -> Element<'a> {
@@ -353,64 +302,20 @@ impl ModCategoryState {
     }
 }
 
-fn format_downloads(downloads: usize) -> String {
-    if downloads < 999 {
-        downloads.to_string()
-    } else if downloads < 10000 {
-        format!("{:.1}K", downloads as f32 / 1000.0)
-    } else if downloads < 1_000_000 {
-        format!("{}K", downloads / 1000)
-    } else if downloads < 10_000_000 {
-        format!("{:.1}M", downloads as f32 / 1_000_000.0)
-    } else {
-        format!("{}M", downloads / 1_000_000)
-    }
-}
-
 fn action_button(
     i: usize,
     hit: &SearchMod,
     is_installed: bool,
     is_downloading: bool,
 ) -> Element<'static> {
-    const WIDTH: u16 = 40;
-
     if is_installed && !is_downloading {
-        // Uninstall button - darker to respect theme
-        tooltip(
-            widget::button(
-                column![icons::bin()]
-                    .width(Length::Fill)
-                    .align_x(Alignment::Center),
-            )
-            .padding(10)
-            .width(WIDTH)
-            .height(MOD_HEIGHT)
-            .style(|t: &LauncherTheme, s| t.style_button(s, StyleButton::SemiDarkBorder([true; 4])))
-            .on_press(InstallModsMessage::Uninstall(i).into()),
-            "Uninstall",
-            widget::tooltip::Position::FollowCursor,
-        )
-        .into()
+        content_store::uninstall(Some(InstallModsMessage::Uninstall(i).into()))
     } else {
         // Download button
-        widget::button(
-            widget::center(
-                column![
-                    icons::download(),
-                    widget::text(format_downloads(hit.downloads))
-                        .size(10)
-                        .style(tsubtitle),
-                ]
-                .spacing(5)
-                .align_x(Alignment::Center),
-            )
-            .style(|_| widget::container::Style::default()),
+        content_store::action(
+            icons::download(),
+            hit.downloads as u64,
+            (!is_downloading).then_some(InstallModsMessage::Download(i).into()),
         )
-        .width(WIDTH)
-        .height(MOD_HEIGHT)
-        .padding(0)
-        .on_press_maybe((!is_downloading).then_some(InstallModsMessage::Download(i).into()))
-        .into()
     }
 }

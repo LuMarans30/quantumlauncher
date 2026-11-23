@@ -1,8 +1,10 @@
 use crate::{
     icons,
     menu_renderer::{
-        CTXI_SIZE, Column, Element, back_to_launch_screen, barthin, button_with_icon, ctx_button,
-        ctx_button_empty, ctx_button_icon, dots, offsetbox, subbutton_with_icon, tsubtitle,
+        CTXI_SIZE, Column, Element, MODS_SIDEBAR_WIDTH, back_to_launch_screen, barthin,
+        button_with_icon,
+        content_row::{self, ContentToolbar},
+        ctx_button, ctx_button_empty, ctx_button_icon, dots, offsetbox, tsubtitle,
         view_info_message,
     },
     message_handler::ForgeKind,
@@ -20,8 +22,6 @@ use iced::{
 };
 use ql_core::{Instance, InstanceKind, Loader, json::InstanceConfigJson};
 use ql_mod_manager::store::QueryType;
-
-pub const MODS_SIDEBAR_WIDTH: u16 = 190;
 
 mod entry;
 
@@ -51,10 +51,10 @@ impl MenuEditMods {
                 widget::horizontal_rule(2)
                     .style(|t: &LauncherTheme| t.style_rule(Color::SecondDark, 1))
             }))
-            .push(row![
+            .push(content_row::installed_page(
                 self.get_sidebar(selected_instance, tick_timer),
-                self.get_mod_list(images)
-            ]);
+                self.get_mod_list(images),
+            ));
 
         self.render_overlays(selected_instance, window_height, menu_main)
     }
@@ -171,73 +171,29 @@ impl MenuEditMods {
         }
     }
 
-    fn get_sidebar<'a>(
-        &'a self,
-        selected_instance: &'a Instance,
-        tick_timer: usize,
-    ) -> widget::Scrollable<'a, Message, LauncherTheme> {
-        const TOP_PADDING: iced::Padding = iced::Padding {
-            top: 5.0,
-            right: 8.0,
-            bottom: 5.0,
-            left: 8.0,
-        };
+    fn get_sidebar<'a>(&'a self, selected_instance: &'a Instance, tick_timer: usize) -> Column<'a> {
+        let open = (!matches!(self.ui_state.modal, Some(MenuEditModsModal::FolderMenu)))
+            .then_some(MenuEditModsModal::FolderMenu);
+        let add = (!matches!(self.ui_state.modal, Some(MenuEditModsModal::AddFile)))
+            .then_some(MenuEditModsModal::AddFile);
 
-        let open_folders_btn = button_with_icon(icons::folder_s(14), "Open...", 14)
-            .padding(TOP_PADDING)
-            .on_press(
-                ManageModsMessage::SetModal(
-                    if let Some(MenuEditModsModal::FolderMenu) = self.ui_state.modal {
-                        None
-                    } else {
-                        Some(MenuEditModsModal::FolderMenu)
-                    },
-                )
-                .into(),
-            );
-
-        // .on_press(ManageModsMessage::AddFile(false).into())
-        let add_file_btn = button_with_icon(icons::file_s(14), "Add File...", 14)
-            .padding(TOP_PADDING)
-            .on_press(
-                ManageModsMessage::SetModal(
-                    if let Some(MenuEditModsModal::AddFile) = self.ui_state.modal {
-                        None
-                    } else {
-                        Some(MenuEditModsModal::AddFile)
-                    },
-                )
-                .into(),
-            );
-
-        widget::scrollable(
+        column![
+            crate::menu_renderer::mod_file_actions(
+                Some(back_to_launch_screen(None)),
+                ManageModsMessage::SetModal(open).into(),
+                Some(ManageModsMessage::SetModal(add).into()),
+            ),
+            self.get_mod_installer_buttons(selected_instance.kind),
             column![
-                column![
-                    row![
-                        button_with_icon(icons::back_s(13), "Back", 14)
-                            .padding(TOP_PADDING)
-                            .on_press(back_to_launch_screen(None)),
-                        open_folders_btn,
-                    ]
-                    .spacing(5),
-                    add_file_btn,
-                ]
-                .spacing(5),
-                self.get_mod_installer_buttons(selected_instance.kind),
-                column![
-                    button_with_icon(icons::download_s(15), "Download Content...", 14)
-                        .on_press(InstallModsMessage::Open.into()),
-                    button_with_icon(icons::file_jar(), "Jarmod Patches", 14)
-                        .on_press(ManageJarModsMessage::Open.into()),
-                ]
-                .spacing(5),
-                self.get_mod_update_pane(tick_timer),
+                crate::menu_renderer::download_content_button(Some(
+                    InstallModsMessage::Open.into()
+                )),
+                button_with_icon(icons::file_jar(), "Jarmod Patches", 14)
+                    .on_press(ManageJarModsMessage::Open.into()),
             ]
-            .padding(10)
-            .spacing(10),
-        )
-        .style(LauncherTheme::style_scrollable_flat_dark)
-        .height(Length::Fill)
+            .spacing(5),
+            self.get_mod_update_pane(tick_timer),
+        ]
     }
 
     fn get_mod_update_pane(&'_ self, tick_timer: usize) -> Column<'_> {
@@ -436,87 +392,25 @@ impl MenuEditMods {
                 }
             });
 
-        widget::container(
-            column![
-                widget::Column::new()
-                    .push_maybe(
-                        warn_no_loader.then_some(widget::container(
-                            widget::text(
-                                // WARN: No loader installed
-                                "You haven't installed any mod loader! Install Fabric/Forge/Quilt/NeoForge as per your mods"
-                            ).size(12)
-                        )
-                        .width(Length::Fill)
-                        .style(|n: &LauncherTheme| n.style_container_sharp_box(0.0, Color::ExtraDark)))
-                    )
-                    .push(
-                        row![
-                            hamburger_dropdown,
-
-                            // Search button
-                            widget::button(
-                                row![icons::search_s(12)]
-                                    .align_y(Alignment::Center)
-                                    .padding(1),
-                            )
-                            .style(|t: &LauncherTheme, s| {
-                                t.style_button(s, if self.search.is_some() {
-                                    StyleButton::Round
-                                } else {
-                                    StyleButton::RoundDark
-                                })
-                            }).on_press(
-                                if self.search.is_some() {
-                                    ManageModsMessage::SetSearch(None).into()
-                                } else {
-                                    Message::Multiple(vec![
-                                        ManageModsMessage::SetSearch(
-                                            Some(String::new())
-                                        ).into(),
-                                        Message::CoreFocusNext
-                                    ])
-                                }
-                            ),
-
-                            subbutton_with_icon(icons::bin_s(12), "Delete")
-                            .on_press_maybe((!self.selection.selected_mods.is_empty()).then_some(ManageModsMessage::DeleteSelected.into())),
-                            // Redundant?
-                            // subbutton_with_icon(icons::toggleoff_s(12), "Toggle")
-                            //     .on_press(ManageModsMessage::ToggleSelected.into()),
-                            subbutton_with_icon(icons::deselectall_s(12), if matches!(self.selection.state, SelectedState::All) {
-                                "Unselect All"
-                            } else {
-                                "Select All"
-                            })
-                            .on_press(ManageModsMessage::SelectAll.into()),
-                        ]
-                        .spacing(5)
-                        .wrap()
-                    )
-                    // Content filter row
-                    .push(
-                        self.get_content_filters()
-                    )
-                    .push(
-                        if self.selection.selected_mods.is_empty() {
-                            widget::text("Select some content to perform actions on them")
-                        } else {
-                            widget::text!("{} item{} selected", self.selection.selected_mods.len(), if self.selection.selected_mods.len() == 1 { "" } else { "s" })
-                        }
-                        .size(11)
-                        .style(|t: &LauncherTheme| t.style_text(Color::Mid))
-                    )
-                    .push_maybe(self.search.as_ref().map(|search|
-                        widget::text_input("Search...", search).size(14).on_input(|msg|
-                            ManageModsMessage::SetSearch(Some(msg)).into()
-                        )
-                    ))
-                    .padding(10)
-                    .spacing(5),
-                widget::responsive(|s| self.get_mod_list_contents(s, images)),
-            ],
-        )
-        .style(|n| n.style_container_sharp_box(0.0, Color::ExtraDark))
+        let warning = warn_no_loader.then(|| widget::text("You haven't installed any mod loader! Install Fabric/Forge/Quilt/NeoForge as per your mods").size(12).into());
+        column![
+            ContentToolbar {
+                leading: hamburger_dropdown.into(),
+                confirm_delete: false,
+                delete: (!self.selection.selected_mods.is_empty())
+                    .then_some(ManageModsMessage::DeleteSelected.into()),
+                all_selected: matches!(self.selection.state, SelectedState::All),
+                select_all: Some(ManageModsMessage::SelectAll.into()),
+            }
+            .header(
+                warning,
+                self.get_content_filters(),
+                self.selection.selected_mods.len(),
+                self.search.as_deref(),
+                Some(|s| ManageModsMessage::SetSearch(s).into())
+            ),
+            widget::responsive(|s| self.get_mod_list_contents(s, images)),
+        ]
         .into()
     }
 
@@ -526,21 +420,9 @@ impl MenuEditMods {
             is_selected: bool,
             filter: Option<QueryType>,
         ) -> widget::Button<'_, Message, LauncherTheme> {
-            widget::button(label.size(11))
-                .padding([3, 6])
-                .style(move |t: &LauncherTheme, s| {
-                    t.style_button(
-                        s,
-                        if is_selected {
-                            StyleButton::Round
-                        } else {
-                            StyleButton::RoundDark
-                        },
-                    )
-                })
-                .on_press(Message::ManageMods(ManageModsMessage::SetContentFilter(
-                    filter,
-                )))
+            crate::menu_renderer::content_filter_button(label, is_selected).on_press(
+                Message::ManageMods(ManageModsMessage::SetContentFilter(filter)),
+            )
         }
 
         row![query_button(
@@ -564,7 +446,7 @@ impl MenuEditMods {
         size: iced::Size,
         images: &'a ImageState,
     ) -> Element<'a> {
-        widget::scrollable(widget::column(
+        content_row::installed_list(widget::column(
             self.sorted_mods_list
                 .iter()
                 .filter(|n| {
@@ -578,15 +460,8 @@ impl MenuEditMods {
                 })
                 .map(|mod_list_entry| self.render_mod_entry(mod_list_entry, size, images)),
         ))
-        .direction(widget::scrollable::Direction::Both {
-            vertical: widget::scrollable::Scrollbar::new(),
-            horizontal: widget::scrollable::Scrollbar::new(),
-        })
         .id(widget::scrollable::Id::new("MenuEditMods:mods"))
         .on_scroll(|viewport| ManageModsMessage::ListScrolled(viewport.absolute_offset()).into())
-        .style(LauncherTheme::style_scrollable_flat_extra_dark)
-        .width(Length::Fill)
-        .height(Length::Fill)
         .into()
     }
 }

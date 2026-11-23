@@ -20,12 +20,16 @@ use crate::{
     stylesheet::styles::{BORDER_RADIUS, BORDER_WIDTH, LauncherThemeLightness},
 };
 
+pub(crate) mod content_row;
+pub(crate) mod content_store;
 mod create;
 mod edit_instance;
 mod launch;
 mod log;
 mod login;
 mod mods;
+pub(crate) use mods::description::ProjectDescription;
+pub(crate) const MODS_SIDEBAR_WIDTH: u16 = 190;
 mod onboarding;
 mod settings;
 mod shortcuts;
@@ -42,6 +46,53 @@ pub const FONT_DEFAULT: iced::Font = iced::Font::with_name("Inter");
 
 pub type Element<'a> = iced::Element<'a, Message, LauncherTheme>;
 pub type Column<'a> = widget::Column<'a, Message, LauncherTheme>;
+
+pub(crate) fn content_filter_button<'a>(
+    label: widget::Text<'a, LauncherTheme>,
+    selected: bool,
+) -> widget::Button<'a, Message, LauncherTheme> {
+    widget::button(label.size(11))
+        .padding([3, 6])
+        .style(move |t: &LauncherTheme, s| {
+            t.style_button(
+                s,
+                if selected {
+                    StyleButton::Round
+                } else {
+                    StyleButton::RoundDark
+                },
+            )
+        })
+}
+
+pub(crate) fn download_content_button<'a>(
+    open: Option<Message>,
+) -> widget::Button<'a, Message, LauncherTheme> {
+    button_with_icon(icons::download_s(15), "Download Content...", 14).on_press_maybe(open)
+}
+
+/// Common navigation and file actions for installed-content managers.
+pub(crate) fn mod_file_actions<'a>(
+    back: Option<Message>,
+    open: Message,
+    add: Option<Message>,
+) -> Column<'a> {
+    column![
+        row![
+            button_with_icon(icons::back_s(13), "Back", 14)
+                .padding([5, 8])
+                .on_press_maybe(back),
+            button_with_icon(icons::folder_s(14), "Open...", 14)
+                .padding([5, 8])
+                .on_press(open),
+        ]
+        .spacing(5),
+        button_with_icon(icons::file_s(14), "Add File...", 14)
+            .padding([5, 8])
+            .on_press_maybe(add),
+    ]
+    .spacing(5)
+}
 
 const PADDING_NOT_BOTTOM: iced::Padding = iced::Padding {
     top: 10.0,
@@ -293,7 +344,17 @@ fn sidebar_button<'a, A: PartialEq>(
         .width(Length::Fill)
 }
 
-fn tsubtitle(t: &LauncherTheme) -> widget::text::Style {
+pub(crate) fn format_downloads(downloads: u64) -> String {
+    match downloads {
+        0..=999 => downloads.to_string(),
+        1_000..=9_999 => format!("{:.1}K", downloads as f64 / 1_000.0),
+        10_000..=999_999 => format!("{}K", downloads / 1_000),
+        1_000_000..=9_999_999 => format!("{:.1}M", downloads as f64 / 1_000_000.0),
+        _ => format!("{}M", downloads / 1_000_000),
+    }
+}
+
+pub(crate) fn tsubtitle(t: &LauncherTheme) -> widget::text::Style {
     t.style_text(Color::SecondLight)
 }
 
@@ -529,6 +590,55 @@ pub fn view_account_login<'a>() -> Element<'a> {
     .padding(10)
     .spacing(5)
     .into()
+}
+
+pub fn error_popup<'a>(title: &'a str, message: &'a str, dismiss: Message) -> Element<'a> {
+    let heading = row![
+        icons::warn_s(20).style(|t: &LauncherTheme| widget::text::Style {
+            color: Some(if t.is_light() {
+                iced::Color::from_rgb8(0x9a, 0x56, 0x09)
+            } else {
+                iced::Color::from_rgb8(0xff, 0xc6, 0x55)
+            }),
+        }),
+        widget::text(title).size(20),
+    ]
+    .align_y(Alignment::Center)
+    .spacing(10);
+    let card = widget::container(
+        column![
+            heading,
+            widget::container(
+                widget::scrollable(widget::text(message).size(14).width(Length::Fill))
+                    .height(Length::Shrink)
+                    .style(|t: &LauncherTheme, status| widget::scrollable::Style {
+                        container: widget::container::Style::default(),
+                        ..t.style_scrollable_flat_dark(status)
+                    }),
+            )
+            .max_height(200)
+            .style(widget::container::transparent),
+            row![
+                widget::horizontal_space(),
+                widget::button("OK").padding([6, 20]).on_press(dismiss),
+            ],
+        ]
+        .spacing(12),
+    )
+    .width(Length::Fill)
+    .max_width(440)
+    .padding(20)
+    .style(|t: &LauncherTheme| {
+        t.style_container_round_box(BORDER_WIDTH, Color::Dark, BORDER_RADIUS)
+    });
+
+    let backdrop = widget::container(card)
+        .center(Length::Fill)
+        .padding(12)
+        .style(|_| {
+            widget::container::Style::default().background(iced::Color::BLACK.scale_alpha(0.55))
+        });
+    widget::opaque(widget::mouse_area(backdrop).on_press(Message::Nothing))
 }
 
 pub fn view_error(error: &'_ str) -> Element<'_> {

@@ -13,19 +13,9 @@ use crate::{
 const MOD_ENABLED_COL: Color = Color::Light;
 const MOD_DISABLED_COL: Color = Color::Mid;
 
-const PADDING: iced::Padding = iced::Padding {
-    top: 4.0,
-    bottom: 6.0,
-    right: 15.0,
-    left: 20.0,
+use crate::menu_renderer::content_row::{
+    ContentRow, ICON_SIZE, MONO_CHAR_WIDTH, PADDING, SPACING, missing_icon,
 };
-const ICON_SIZE: f32 = 18.0;
-const SPACING: u16 = 16;
-
-/// Pixel width of a single glyph in JetBrains Mono at our UI sizes.
-/// This is relied upon for manual column alignment.
-/// If font/size changes, THIS MUST BE UPDATED.
-const MONO_CHAR_WIDTH: f32 = 7.2;
 
 impl MenuEditMods {
     pub(super) fn render_mod_entry<'a>(
@@ -136,7 +126,7 @@ impl MenuEditMods {
                 id: (*id).clone(),
             });
 
-        let image = config.icon_url.as_ref().map_or_else(empty_icon, |url| {
+        let image = config.icon_url.as_ref().map_or_else(missing_icon, |url| {
             images.view(Some(url), Some(ICON_SIZE), Some(ICON_SIZE))
         });
 
@@ -150,75 +140,22 @@ impl MenuEditMods {
         );
 
         let is_enabled_ui = is_enabled || !config.project_type.is_toggleable();
-        let name = widget::text(&*config.name)
-            .shaping(widget::text::Shaping::Advanced)
-            .size(14);
-
-        let name: Element = if is_enabled_ui {
-            name.width(self.ui_state.width_name)
-                .style(|t: &LauncherTheme| t.style_text(MOD_ENABLED_COL))
-                .into()
-        } else {
-            row![widget::stack!(
-                name.style(|t: &LauncherTheme| t.style_text(MOD_DISABLED_COL)),
-                row![
-                    widget::horizontal_rule(1)
-                        .style(|t: &LauncherTheme| t.style_rule(MOD_DISABLED_COL, 1))
-                ]
-                .height(Length::Fill)
-                .align_y(Alignment::Center)
-            )]
-            .width(self.ui_state.width_name)
-            .into()
-        };
-
-        let select = select_box(
-            row![
-                toggle,
-                image,
-                widget::Space::with_width(1),
-                name,
-                widget::text(&config.installed_version)
-                    .style(move |t: &LauncherTheme| t.style_text(if is_enabled {
-                        Color::Mid
-                    } else {
-                        Color::SecondDark
-                    }))
-                    .font(FONT_MONO)
-                    .size(12)
-            ]
-            .push_maybe({
-                // Measure the length of the text
-                // then from there measure the space it would occupy
-                // (only possible because monospace font)
-
-                // This is for finding the filler space
-                //
-                // ║ Some Mod         v0.0.1                ║
-                // ║ Some other mod   2.4.1-fabric          ║
-                //
-                //  ╙═╦══════════════╜            ╙═╦══════╜
-                //  Measured by:                   What we want
-                //  `self.width_name`              to find
-
-                let measured: f32 = (config.installed_version.len() as f32) * MONO_CHAR_WIDTH;
-                let occupied =
-                    measured + self.ui_state.width_name + PADDING.left + PADDING.right + 150.0;
-                let space = size.width - occupied;
-                (space > 0.0).then_some(widget::Space::with_width(space))
-            })
-            .align_y(Alignment::Center)
-            .padding(PADDING)
-            .spacing(SPACING),
-            is_selected,
-            ManageModsMessage::SelectMod(
+        let select = ContentRow {
+            indicator: toggle,
+            icon: image,
+            name: &config.name,
+            version: &config.installed_version,
+            enabled: is_enabled_ui,
+            selected: is_selected,
+            name_width: self.ui_state.width_name,
+            select: ManageModsMessage::SelectMod(
                 config.name.clone(),
                 Some(id.clone()),
                 config.project_type,
             )
             .into(),
-        )
-        .padding(0);
+        }
+        .button(size.width);
 
         self.with_mod_right_click(id, config, select).into()
     }
@@ -247,13 +184,6 @@ impl MenuEditMods {
             },
         )
     }
-}
-
-fn empty_icon() -> Element<'static> {
-    widget::Column::new()
-        .width(ICON_SIZE)
-        .height(ICON_SIZE)
-        .into()
 }
 
 fn mod_toggler_or_indicator<'a>(

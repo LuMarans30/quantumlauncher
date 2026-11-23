@@ -1,4 +1,4 @@
-mod description;
+pub(super) mod description;
 mod export_text;
 mod install_loader;
 mod instance_package;

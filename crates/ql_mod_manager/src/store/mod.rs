@@ -31,8 +31,8 @@ pub use modrinth::ModrinthBackend;
 pub use recommended::{RECOMMENDED_MODS, RecommendedMod};
 pub use toggle::{flip_filename, toggle_mods, toggle_mods_local};
 pub use types::{
-    Category, CurseforgeNotAllowed, DirStructure, LocalMod, Query, QueryType, SearchMod,
-    SearchResult, SelectedMod, StoreBackendType,
+    Category, CurseforgeNotAllowed, DirStructure, GalleryItem, LocalMod, Query, QueryType,
+    SearchMod, SearchResult, SelectedMod, StoreBackendType, UrlKind,
 };
 pub use update::{ChangelogFile, apply_updates, check_for_updates};
 
