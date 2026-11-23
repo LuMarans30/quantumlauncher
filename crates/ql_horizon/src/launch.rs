@@ -137,7 +137,8 @@ pub async fn launch(
     // Ask the build what it accepts first: the Launch API is experimental,
     // so a dropped option must fail clearly here instead of as exit code 2
     // mid-launch.
-    let api: LaunchApi = api::query(&build.client(), "horizon-client").await?;
+    let program = build.client();
+    let api: LaunchApi = api::query(&program, "horizon-client").await?;
     api.require("--resources")?;
     api.require("--game-dir")?;
     api.require("--home")?;
@@ -172,7 +173,7 @@ pub async fn launch(
     tokio::fs::create_dir_all(&game_dir).await.path(&game_dir)?;
     tokio::fs::create_dir_all(&home).await.path(&home)?;
 
-    let mut command = Command::new(build.client());
+    let mut command = Command::new(&program);
     command
         .arg("--resources")
         .arg(&prepared.dir)
@@ -204,7 +205,7 @@ pub async fn launch(
         command.args(&extra_args);
     }
 
-    apply_env_vars(config, &mut command);
+    apply_env_vars(config, global_settings, &mut command);
 
     command
         .stdin(if session.is_some() {
@@ -219,10 +220,7 @@ pub async fn launch(
 
     let mut child = command
         .spawn()
-        .map_err(|error| HorizonError::CommandError {
-            program: build.client(),
-            error,
-        })?;
+        .map_err(|error| HorizonError::CommandError { program, error })?;
 
     // Closing stdin after the write tells the game the session is complete.
     if let Some(session) = session {
@@ -246,24 +244,34 @@ pub async fn launch(
     })
 }
 
-fn apply_env_vars(config: &InstanceConfigJson, command: &mut Command) {
-    for (key, value) in allowed_env_vars(config) {
+fn apply_env_vars(
+    config: &InstanceConfigJson,
+    global_settings: Option<&GlobalSettings>,
+    command: &mut Command,
+) {
+    for (key, value) in allowed_env_vars(config, global_settings) {
         command.env(key, value);
     }
 }
 
-/// Filters out launcher-controlled environment variables.
-fn allowed_env_vars(config: &InstanceConfigJson) -> Vec<(String, String)> {
-    let Some(vars) = config
+/// Combines the launcher-wide and instance environment variables, filters out
+/// the launcher-controlled ones, and puts instance variables last so they
+/// override a launcher-wide variable with the same name.
+fn allowed_env_vars(
+    config: &InstanceConfigJson,
+    global_settings: Option<&GlobalSettings>,
+) -> Vec<(String, String)> {
+    let global = global_settings
+        .and_then(|settings| settings.env_vars.as_deref())
+        .unwrap_or_default();
+    let instance = config
         .global_settings
         .as_ref()
-        .and_then(|settings| settings.env_vars.as_ref())
-    else {
-        return Vec::new();
-    };
+        .and_then(|settings| settings.env_vars.as_deref())
+        .unwrap_or_default();
 
     let mut allowed = Vec::new();
-    for var in vars {
+    for var in global.iter().chain(instance) {
         let Some((key, value)) = var.split_once('=') else {
             continue;
         };
@@ -410,7 +418,7 @@ mod tests {
             .unwrap(),
         );
 
-        let applied = allowed_env_vars(&config);
+        let applied = allowed_env_vars(&config, None);
 
         assert!(
             applied.iter().any(|(key, _)| key == "LD_PRELOAD"),
@@ -424,6 +432,50 @@ mod tests {
                 "{forbidden} must not reach the game: {applied:?}"
             );
         }
+    }
+
+    #[test]
+    fn launcher_wide_environment_variables_apply_and_instance_wins() {
+        let mut config = InstanceConfigJson::new(
+            ql_core::InstanceKind::Client,
+            false,
+            ql_core::json::instance_config::VersionInfo::new("horizon-test"),
+        );
+        config.global_settings = Some(
+            serde_json::from_str(r#"{"env_vars": ["DXVK_HUD=1", "SHARED_VAR=instance"]}"#).unwrap(),
+        );
+        let global_settings: GlobalSettings = serde_json::from_str(
+            r#"{"env_vars": [
+                "__NV_PRIME_RENDER_OFFLOAD=1",
+                "SHARED_VAR=global",
+                "HORIZON_HOME=/tmp/evil"
+            ]}"#,
+        )
+        .unwrap();
+
+        let applied = allowed_env_vars(&config, Some(&global_settings));
+
+        assert!(
+            applied
+                .iter()
+                .any(|(key, value)| key == "__NV_PRIME_RENDER_OFFLOAD" && value == "1"),
+            "launcher-wide variables reach the game: {applied:?}"
+        );
+        assert!(
+            applied.iter().any(|(key, _)| key == "DXVK_HUD"),
+            "instance variables still reach the game: {applied:?}"
+        );
+        assert!(
+            !applied
+                .iter()
+                .any(|(key, _)| key.eq_ignore_ascii_case("HORIZON_HOME")),
+            "launcher-controlled variables are filtered from global settings too: {applied:?}"
+        );
+        assert_eq!(
+            applied.iter().rev().find(|(key, _)| key == "SHARED_VAR"),
+            Some(&("SHARED_VAR".to_owned(), "instance".to_owned())),
+            "the instance value is applied last, so it overrides the launcher-wide one: {applied:?}"
+        );
     }
 
     #[test]
