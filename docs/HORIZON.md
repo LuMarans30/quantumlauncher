@@ -1,164 +1,60 @@
 # Horizon
 
-[Horizon](https://playhorizon.dev) is Minecraft: Java Edition
-reimplemented in Rust: it runs the game natively (wgpu), without Java,
-and prepares its own resources from a Minecraft installation the player
-already owns. QuantumLauncher can install, prepare and launch it.
+[Horizon](https://playhorizon.dev) is a Rust implementation of Minecraft: Java Edition. It runs natively, without a JVM. QuantumLauncher supports Horizon Nightly for **client instances only**. Both Nightly and Horizon’s [Launch API](https://github.com/horizon-rust/horizon/blob/main/docs/api/launch.md) are experimental.
 
-> **Experimental.** Horizon's
-> [Launch API](https://github.com/horizon-rust/horizon/blob/main/docs/api/launch.md)
-> and its Nightly release channel are both experimental upstream, and
-> this integration follows them. Expect breakage when Horizon changes.
+## First launch
 
-## Using it
+1. Create a client instance, choose **Horizon (nightly)** from the version list and give it a name. The launcher downloads Horizon and verifies the archive against its signed checksums. It doesn’t download Minecraft yet.
+2. Select the instance and press **Play**. The first launch for a build takes a few minutes: the launcher downloads the Minecraft version that build needs, then runs `horizon-prepare` to make the game resources. If the preparer needs Java, the launcher installs it for you.
+3. Next time, press **Play** as usual. Instances on the same Horizon build share the prepared resources, but not their saves or settings.
 
-1. Open the **create instance** screen.
-2. Pick **Horizon (nightly)** in the version list (it is always at the
-   top, above the Minecraft versions) and give the instance a name.
-3. Create it. QuantumLauncher downloads the newest Horizon Nightly for
-   your platform, verifies its Ed25519-signed `SHA256SUMS`, unpacks it
-   and writes the instance. **Creating an instance makes no Mojang
-   requests.**
-4. Log in with a **Microsoft account that owns Minecraft: Java
-   Edition**, select the instance and press Play. The first launch
-   downloads the Minecraft files Horizon's preparer reads (the version
-   Horizon is pinned to, currently 26.3) and runs `horizon-prepare`,
-   which builds the game's resources from them (a few minutes, once per
-   Horizon build).
-5. When a newer Nightly is published, open the instance's **Edit** tab
-   and press **Check for updates**. See [Updating](#updating).
-
-Horizon has no Java at play time. The Java 25 that `horizon-prepare`
-needs is installed automatically (like for any other instance).
-
-The preparation is behind the account gate: without an owning Microsoft
-account (or with offline play off), the launcher refuses before it
-downloads any Mojang file.
-
-## Offline play (off by default)
-
-Offline accounts are refused, because Horizon's Launch API asks
-launchers to start it only for an account that owns Minecraft: Java
-Edition. The offline path is implemented and tested, behind one switch:
-
-```rust
-// crates/ql_horizon/src/lib.rs
-pub const ALLOW_OFFLINE: bool = false; // <- `true` allows offline accounts
-```
-
-With it on, an offline (or Ely.by/LittleSkin) profile starts the game
-with `--name` instead of a session; online-mode servers refuse the
-player, exactly like offline vanilla. Signed-in play is unaffected.
+**Accounts:** Sign in with a Microsoft account that owns Minecraft: Java Edition. Offline, Ely.by and LittleSkin profiles can’t launch Horizon.
 
 ## Requirements
 
-Horizon supports:
-
-| Platform | Supported |
+| System | Requirements |
 | --- | --- |
-| Windows x64 / ARM64 | ✅ needs Vulkan or DirectX 12 |
-| macOS 12+ (Intel, Apple Silicon) | ✅ |
-| Linux x86_64 | ✅ needs Vulkan or OpenGL 3.3 |
-| Linux ARM64, BSDs, other architectures | ❌ no upstream build |
+| Windows | x64 or ARM64; Vulkan or DirectX 12 |
+| macOS | 12 or later; Intel or Apple Silicon |
+| Linux | x86_64; Vulkan or OpenGL 3.3 |
 
-The launcher refuses unsupported platforms with a clear message.
+There’s no launcher build of Horizon for Linux ARM64 or BSD.
 
-## Where things are kept
+## Mods and shaders
 
-Everything is under the launcher's data folder
-(`~/.local/share/QuantumLauncher/` on Linux):
+Stop the game, then open **Mods** on the instance. Choose **Download Content…** to browse the Horizon registry, or **Add File…** if you already have the package. Both accept the same formats:
 
-| Path | Contents |
+| Package | How to use it |
 | --- | --- |
-| `horizon/builds/<nightly>-<sha>/` | Horizon's binaries (`horizon-client`, `horizon-prepare`, …) |
-| `horizon/prepared/<nightly>-<sha>/` | Resources `horizon-client --resources` reads; one per build, shared by all instances |
-| `horizon/minecraft/<version>/` | Version JSON, client jar, libraries, assets and server jar used for preparing |
-| `instances/<name>/` | The instance's `config.json` (with a `horizon` section) |
-| `instances/<name>/.minecraft/` | The game folder: saves, options, packs, `horizon-mods/` |
-| `instances/<name>/horizon/` | Horizon's logs (`logs/latest.log`) and crash reports |
+| `.hmod` (content or WebAssembly mod) | New mods start disabled. Enable the mod in the launcher, then start Horizon. |
+| `.hshader` (Horizon shader) | Select the pack in Horizon’s shader settings. |
+| `.zip` (Iris/OptiFine GLSL shader pack) | Leave it zipped. The launcher checks for `.fsh` or `.vsh` programs under `shaders/` and copies the ZIP to `shaderpacks/`. Select it in-game. |
 
-Build folders are named after the archive's SHA-256 because the
-`nightly` tag is republished every day: the checksum, not the tag, says
-which build is on disk.
+In the registry, **Shaders** shows both shader formats. Click a project to read about it, the download icon to install it, or the bin icon to uninstall it. The launcher checks the Minecraft version, skips revoked releases and verifies the checksum and any author signature. Mods and `.hshader` packs must also match the build’s content API; GLSL ZIPs don’t use that API.
 
-Deleting an instance only deletes its folder; the shared build and
-prepared resources stay (other instances may use them). Delete
-`horizon/` to reclaim that space.
+If a mod won’t load, check Horizon’s Mods screen and logs: the launcher doesn’t install dependencies for you. For a Java mod JAR, look for a Horizon port instead. The manager doesn’t install native mods or registry modpacks, resource packs or datapacks. You can still add resource packs and datapacks manually.
 
 ## Updating
 
-Updating is manual: the **Edit** tab checks for a newer Nightly, shows
-its build id, and installs it on request. Nothing updates behind the
-player's back, because Nightly is experimental upstream.
+Nightly updates are manual. Open **Edit → Check for updates**, then choose **Update Horizon**. If you already have the latest build but its installation is missing or incomplete, choose **Repair Horizon** instead.
 
-If the current build is missing or incomplete, **Check for updates** also
-checks its installation. When it is still the latest Nightly, **Repair
-Horizon** reinstalls that same build through the verified installer. If
-Nightly has moved on, install the offered newer build instead. Neither
-action requires recreating the instance.
+The launcher switches the instance to the new build only after the download is verified and unpacked. Your worlds, options and packs stay where they are. The next launch prepares resources for the new build if needed. Old builds stay on disk because other instances may still use them.
 
-- The new build is installed beside the old one under
-  `horizon/builds/`; the instance's `config.json` is repointed only
-  after the download, signature, checksum and unpack all succeed.
-- Worlds, options, packs and `horizon-mods/` live in the instance's
-  `.minecraft/` folder and are not touched.
-- A newer build may pin a different Minecraft version. The next launch
-  then downloads those Minecraft files and re-runs `horizon-prepare`
-  (a few minutes), shown on a **Preparing to launch** screen. If the
-  build's preparer asks for a Java version you don't have yet, that is
-  installed first; Horizon itself still runs without Java.
-- Old build and prepared-resource folders are not deleted
-  automatically: another instance may still use them, and a build you
-  already downloaded stays on disk (point the instance's
-  `horizon.build_id` back at it in `config.json` if a Nightly breaks).
-  Delete `horizon/` when you no longer need them.
-- Only the Nightly channel is tracked. An instance whose `build_tag`
-  is something else (for example an imported one) is refused by the
-  update check rather than silently moved to Nightly.
+## Instance settings
 
-## What isn't supported yet
+**Edit** shows the Horizon build ID and Minecraft version. Window size, environment variables and supported game arguments apply. Instance variables override launcher-wide ones, but you can’t override the session or game folders through arguments or environment variables. Java heap size, JVM arguments, custom JARs and pre-launch prefixes don’t apply to Horizon.
 
-- **Mods and packs**: Horizon uses its own `.hmod`/`.hnmod` formats and
-  its own registry. QuantumLauncher's mod store, mod manager and modpack
-  import are Java-shaped and don't apply. The **Mods** button is hidden
-  for Horizon instances, and mod-management shortcuts are ignored. The game folder's
-  `horizon-mods/`, `resourcepacks/`, `shaderpacks/` and `datapacks/`
-  can still be filled by hand.
-- **Horizon servers**: only client instances are created for now, even
-  though Horizon ships a `horizon-server` binary.
-- **RAM/Java settings**: they mean nothing to Horizon, so the edit
-  screen hides them for Horizon instances (memory, Java version/path,
-  Java arguments, custom JAR, main class) and ignores any values already
-  in `config.json`. Window size, environment variables and extra game
-  arguments still apply (extra arguments are passed to `horizon-client`
-  as-is; it refuses options it doesn't list with exit code 2). The
-  edit screen shows the Horizon build (release, build ID and Minecraft
-  version) instead, and has no Reinstall Libraries / Update Assets
-  buttons: Horizon has no libraries or assets of its own to reinstall.
-- **Pre-launch prefix**: neither the instance's nor the global prefix is
-  applied to Horizon (the Java launch path builds it, the Horizon path
-  does not), so the edit screen hides it for Horizon instances.
-- **Offline accounts** need [`ALLOW_OFFLINE`](#offline-play-off-by-default)
-  turned on, because upstream asks launchers to require an owning
-  Microsoft account.
+## Where files live
 
-## Implementation
+Paths below are relative to the launcher’s data folder (`~/.local/share/QuantumLauncher/` on Linux).
 
-- Release archives are accepted only after `SHA256SUMS.sig` (Ed25519
-  over `horizon release <tag>\n` plus the exact `SHA256SUMS` bytes)
-  verifies against Horizon's pinned release keys; then the archive's
-  SHA-256 is checked. A missing or invalid signature fails closed.
-- `crates/ql_horizon` talks to Horizon only through the documented
-  Launch API (`horizon-client --launch-api`,
-  `horizon-prepare --launch-api`, `--session-stdin`, exit codes); no
-  Horizon code is linked into the launcher, and its Rust edition/MSRV
-  requirements don't affect this workspace.
-- `crates/ql_instances` routes instance creation and launching to it:
-  a `config.json` with a `horizon` section means "not a Minecraft
-  instance", so the Java argument/classpath pipeline is skipped.
-- Updating installs the new build through the same verified path as
-  creation (`install_build`), then rewrites the `horizon` section of
-  `config.json`, keeping fields written by newer launchers. A config
-  write never happens before the build is complete.
-- The instance's account is handed over as the session JSON on standard
-  input, never on the command line.
+| Path | What’s there |
+| --- | --- |
+| `instances/<name>/.minecraft/` | Saves, options, `horizon-mods/` and `shaderpacks/` |
+| `instances/<name>/horizon/` | Horizon logs, crash reports and registry key receipts |
+| `instances/<name>/config.json` | Instance settings, including the selected Horizon build |
+| `horizon/builds/<build-id>/` | Downloaded binaries. The ID includes part of the archive checksum because the `nightly` tag is reused. |
+| `horizon/prepared/<build-id>/` | Resources prepared for that build |
+| `horizon/minecraft/<version>/` | Minecraft files used by the preparer |
+
+Deleting an instance removes its saves and settings, not the shared downloads. To reclaim space, remove only build and resource folders that no remaining instance needs.
